@@ -166,7 +166,12 @@ async function startServer() {
 
       const openRouterKey = process.env.OPENROUTER_API_KEY;
       if (openRouterKey) {
-        const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+        const hasImages = body.messages.some(
+          (m) => m.attachment && m.attachment.data && m.attachment.mimeType
+        );
+        const defaultModel = process.env.OPENROUTER_MODEL || 'z-ai/glm-4.7-flash';
+        const visionModel = process.env.OPENROUTER_VISION_MODEL || 'nvidia/nemotron-3.5-super-vl:free';
+        const model = hasImages ? visionModel : defaultModel;
         const maxTokens = Number(process.env.OPENROUTER_MAX_TOKENS) || 4000;
 
         const openRouterMessages = [
