@@ -51,6 +51,7 @@ export default defineConfig(() => {
           'favicon.png',
           'apple-touch-icon.png',
           'logo-transparent.png',
+          'amr-mohsen-hero.jpg',
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',

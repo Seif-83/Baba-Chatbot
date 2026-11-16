@@ -440,15 +440,15 @@ export default function App() {
           {activeConversation.messages.length === 0 ? (
             <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col items-center">
               {/* Central Medallion Hero */}
-              <div className="relative mb-5">
+              <div className="relative mb-6">
                 <img
-                  src="/logo-transparent.png"
+                  src="/amr-mohsen-hero.jpg"
                   onError={(e) => {
                     (e.currentTarget as HTMLImageElement).src =
-                      '/assets/aistudio/image_6971e0e5.png';
+                      '/logo-transparent.png';
                   }}
                   alt="شعار مستر عمرو محسن الرسمي"
-                  className="w-28 h-28 sm:w-36 sm:h-36 rounded-full object-contain drop-shadow-xl"
+                  className="w-48 h-48 sm:w-60 sm:h-60 rounded-3xl object-contain drop-shadow-2xl bg-white p-2 border border-slate-200/80 shadow-lg hover:scale-105 transition-transform duration-300"
                   referrerPolicy="no-referrer"
                 />
               </div>
