@@ -1,0 +1,110 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+@layer base {
+  :root {
+    --font-sans: "Cairo", "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    --font-display: "Plus Jakarta Sans", "Cairo", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #f8f9fb;
+    color: #0f172a;
+    margin: 0;
+    padding: 0;
+    overscroll-behavior-y: contain;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-math {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle architectural math blueprint background for welcome stage */
+.math-grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(19, 35, 70, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(19, 35, 70, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* Ensure KaTeX mathematical expressions always render LTR even inside RTL Arabic paragraphs */
+.katex,
+.katex-display {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+}
+
+/* Clean markdown styling inside assistant responses */
+.math-prose p {
+  margin-bottom: 0.65rem;
+  line-height: 1.75;
+}
+
+.math-prose p:last-child {
+  margin-bottom: 0;
+}
+
+.math-prose ul,
+.math-prose ol {
+  margin: 0.5rem 0 0.75rem 0;
+  padding-inline-start: 1.35rem;
+}
+
+.math-prose ol {
+  list-style-type: decimal;
+}
+
+.math-prose ul {
+  list-style-type: disc;
+}
+
+.math-prose li {
+  margin-bottom: 0.35rem;
+  line-height: 1.7;
+}
+
+.math-prose strong {
+  color: #132346;
+  font-weight: 700;
+}
+
+.math-prose h1,
+.math-prose h2,
+.math-prose h3 {
+  color: #132346;
+  font-weight: 700;
+  margin-top: 0.85rem;
+  margin-bottom: 0.4rem;
+}
+
+.math-prose hr {
+  border-color: #e2e8f0;
+  margin: 0.85rem 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

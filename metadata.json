@@ -1,0 +1,6 @@
+{
+  "name": "Mr. Amr Mohsen - Math AI Tutor",
+  "description": "المساعد الذكي للرياضيات للمرحلة الإعدادية مع مستر عمرو محسن - شرح وحل مسائل الجبر والهندسة خطوة بخطوة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
