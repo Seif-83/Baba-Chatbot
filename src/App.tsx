@@ -3,6 +3,8 @@ import {
   Menu,
   Send,
   ImagePlus,
+  Camera,
+  FileText,
   X,
   Copy,
   Check,
@@ -22,7 +24,7 @@ import {
 import type {
   ChatMessage,
   Conversation,
-  ImageAttachment,
+  ChatAttachment,
   LanguagePreference,
   MathBranch,
   PrepGrade,
@@ -67,7 +69,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string>(() => conversations[0]?.id || '');
   const [language, setLanguage] = useState<LanguagePreference>('bilingual');
   const [input, setInput] = useState('');
-  const [attachment, setAttachment] = useState<ImageAttachment | null>(null);
+  const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [formulaDrawerOpen, setFormulaDrawerOpen] = useState(false);
@@ -76,7 +78,9 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) || conversations[0],
@@ -91,7 +95,14 @@ export default function App() {
         messages: conv.messages.map((m) => ({
           ...m,
           attachment: m.attachment
-            ? { mimeType: m.attachment.mimeType, data: '', previewUrl: undefined }
+            ? {
+                type: m.attachment.type,
+                name: m.attachment.name,
+                mimeType: m.attachment.mimeType,
+                data: '',
+                previewUrl: undefined,
+                extractedText: m.attachment.extractedText?.slice(0, 300),
+              }
             : undefined,
         })),
       }));
@@ -138,7 +149,7 @@ export default function App() {
     });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) return;
@@ -148,9 +159,60 @@ export default function App() {
       const result = reader.result as string;
       const base64 = result.split(',')[1] || '';
       setAttachment({
-        mimeType: file.type,
+        type: 'image',
+        name: file.name,
+        mimeType: file.type || 'image/jpeg',
         data: base64,
         previewUrl: result,
+        size: file.size,
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleDocChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const lower = file.name.toLowerCase();
+    const isWord = lower.endsWith('.docx') || lower.endsWith('.doc') || file.type.includes('word');
+    const isPdf = lower.endsWith('.pdf') || file.type.includes('pdf');
+    const isText = file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md');
+
+    let extractedText = '';
+    if (isText) {
+      try {
+        extractedText = await file.text();
+      } catch {}
+    } else if (isWord && lower.endsWith('.docx')) {
+      try {
+        const mammoth = await import('mammoth');
+        const arrayBuffer = await file.arrayBuffer();
+        const res = await (mammoth.default || mammoth).extractRawText({ arrayBuffer });
+        extractedText = res.value || '';
+      } catch (err) {
+        console.warn('Word client extraction note:', err);
+      }
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(',')[1] || '';
+      setAttachment({
+        type: 'document',
+        name: file.name,
+        mimeType:
+          file.type ||
+          (isWord
+            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : isPdf
+            ? 'application/pdf'
+            : 'text/plain'),
+        data: base64,
+        extractedText,
+        size: file.size,
       });
     };
     reader.readAsDataURL(file);
@@ -180,12 +242,20 @@ export default function App() {
     const userMsg: ChatMessage = {
       id: `msg_${Date.now()}_u`,
       role: 'user',
-      content: textToSend || 'حل المسألة الموجودة في الصورة خطوة بخطوة.',
+      content:
+        textToSend ||
+        (attachment?.type === 'document'
+          ? 'يرجى قراءة هذا المستند وشرح وحل المسائل الموجودة فيه بالتفصيل.'
+          : 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.'),
       attachment: attachment
         ? {
+            type: attachment.type,
+            name: attachment.name,
             mimeType: attachment.mimeType,
             data: attachment.data,
             previewUrl: attachment.previewUrl,
+            extractedText: attachment.extractedText,
+            size: attachment.size,
           }
         : undefined,
       createdAt: Date.now(),
@@ -202,10 +272,15 @@ export default function App() {
     const currentHistory = activeConversation.messages;
     const nextHistory = [...currentHistory, userMsg];
 
+    const defaultTitle =
+      attachment?.name
+        ? attachment.name.slice(0, 38)
+        : textToSend
+        ? textToSend.replace(/\$/g, '').slice(0, 38)
+        : 'مسألة مرفقة';
+
     const derivedTitle =
-      currentHistory.length === 0
-        ? (textToSend || 'مسألة بالصورة').replace(/\$/g, '').slice(0, 38)
-        : activeConversation.title;
+      currentHistory.length === 0 ? defaultTitle : activeConversation.title;
 
     updateActiveConversation((conv) => ({
       ...conv,
@@ -234,7 +309,12 @@ export default function App() {
             content: m.content,
             attachment:
               m.attachment && m.attachment.data
-                ? { mimeType: m.attachment.mimeType, data: m.attachment.data }
+                ? {
+                    name: m.attachment.name,
+                    mimeType: m.attachment.mimeType,
+                    data: m.attachment.data,
+                    extractedText: m.attachment.extractedText,
+                  }
                 : undefined,
           })),
           grade: activeConversation.grade,
@@ -538,13 +618,27 @@ export default function App() {
                   return (
                     <div key={msg.id} className="flex justify-start">
                       <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-sm bg-[#132346] text-white px-4 py-3 shadow-sm space-y-2">
-                        {msg.attachment?.previewUrl && (
-                          <img
-                            src={msg.attachment.previewUrl}
-                            alt="صورة المسألة المرفقة"
-                            className="max-h-56 rounded-xl object-contain bg-white/10"
-                            referrerPolicy="no-referrer"
-                          />
+                        {msg.attachment && (
+                          msg.attachment.type === 'document' || !msg.attachment.previewUrl ? (
+                            <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/10 border border-white/20 text-xs">
+                              <FileText className="w-5 h-5 text-[#C9A25D] shrink-0" />
+                              <div className="min-w-0">
+                                <span className="font-semibold block truncate">
+                                  {msg.attachment.name || 'مستند مرفق'}
+                                </span>
+                                <span className="text-[11px] text-white/70 block">
+                                  مستند أسئلة / واجب
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <img
+                              src={msg.attachment.previewUrl}
+                              alt="صورة المسألة المرفقة"
+                              className="max-h-56 rounded-xl object-contain bg-white/10"
+                              referrerPolicy="no-referrer"
+                            />
+                          )
                         )}
                         <p className="text-[15px] leading-relaxed whitespace-pre-wrap" dir="auto">
                           {msg.content}
@@ -659,52 +753,115 @@ export default function App() {
               </div>
             )}
 
-            {/* Attached Problem Photo Preview */}
+            {/* Attached Problem Photo or Document Preview */}
             {attachment && (
-              <div className="flex items-center gap-3 p-2 rounded-xl bg-slate-50 border border-slate-200 w-fit">
-                <img
-                  src={attachment.previewUrl}
-                  alt="معاينة الصورة"
-                  className="w-12 h-12 rounded-lg object-cover"
-                  referrerPolicy="no-referrer"
-                />
-                <span className="text-xs font-medium text-slate-700">
-                  تم إرفاق صورة المسألة
-                </span>
+              <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-200 w-fit max-w-full">
+                {attachment.type === 'document' || !attachment.previewUrl ? (
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-[#132346]/10 flex items-center justify-center shrink-0 text-[#132346]">
+                      <FileText className="w-5 h-5 text-[#B86428]" />
+                    </div>
+                    <div className="min-w-0 pr-1">
+                      <span className="text-xs font-bold text-slate-800 truncate block max-w-[200px] sm:max-w-xs">
+                        {attachment.name || 'مستند مرفق'}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-sans block">
+                        {attachment.size ? `${(attachment.size / 1024).toFixed(1)} KB • ` : ''}مستند جاهز للتحليل
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src={attachment.previewUrl}
+                      alt="معاينة الصورة"
+                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold text-slate-800 block">
+                        صورة مسألة
+                      </span>
+                      <span className="text-[11px] text-slate-500 block">
+                        جاهزة للشرح والحل
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
-                  className="p-1 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50"
-                  aria-label="إزالة الصورة"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors mr-1 shrink-0"
+                  aria-label="إزالة المرفق"
+                  title="إزالة المرفق"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             )}
 
-            <div className="flex items-end gap-2 rounded-2xl border border-slate-300 bg-[#F8F9FB] px-2.5 py-2 focus-within:border-[#132346] focus-within:ring-2 focus-within:ring-[#132346]/10 transition-all">
+            <div className="flex items-end gap-1.5 sm:gap-2 rounded-2xl border border-slate-300 bg-[#F8F9FB] px-2 sm:px-2.5 py-2 focus-within:border-[#132346] focus-within:ring-2 focus-within:ring-[#132346]/10 transition-all">
+              {/* Hidden file inputs */}
               <input
-                ref={fileInputRef}
+                ref={cameraInputRef}
                 type="file"
                 accept="image/*"
-                onChange={handleFileChange}
+                capture="environment"
+                onChange={handleImageChange}
+                className="hidden"
+              />
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="hidden"
+              />
+              <input
+                ref={docInputRef}
+                type="file"
+                accept=".doc,.docx,.pdf,.txt,.rtf,.md"
+                onChange={handleDocChange}
                 className="hidden"
               />
 
+              {/* Camera Button */}
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-600 hover:text-[#132346] hover:bg-slate-200/70 transition-colors shrink-0"
-                title="إرفاق صورة مسألة من الكتاب أو الكراسة"
+                onClick={() => cameraInputRef.current?.click()}
+                className="min-w-[38px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-600 hover:text-[#B86428] hover:bg-slate-200/70 transition-colors shrink-0"
+                title="فتح الكاميرا لتصوير المسألة مباشرة"
+                aria-label="فتح الكاميرا"
+              >
+                <Camera className="w-5 h-5 text-[#B86428]" />
+              </button>
+
+              {/* Image Picker Button */}
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                className="min-w-[38px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-600 hover:text-[#132346] hover:bg-slate-200/70 transition-colors shrink-0"
+                title="اختيار صورة مسألة من الجهاز"
                 aria-label="رفع صورة مسألة"
               >
                 <ImagePlus className="w-5 h-5" />
               </button>
 
+              {/* Document Picker Button */}
+              <button
+                type="button"
+                onClick={() => docInputRef.current?.click()}
+                className="min-w-[38px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-600 hover:text-[#132346] hover:bg-slate-200/70 transition-colors shrink-0"
+                title="إرفاق مستند أو مذكرة (Word, PDF, Text)"
+                aria-label="رفع مستند"
+              >
+                <FileText className="w-5 h-5" />
+              </button>
+
               <button
                 type="button"
                 onClick={() => setShowSymbolBar((prev) => !prev)}
-                className={`min-w-[40px] min-h-[44px] px-2 flex items-center justify-center rounded-xl text-sm font-mono-math font-bold transition-colors shrink-0 ${
+                className={`min-w-[38px] min-h-[40px] px-2 flex items-center justify-center rounded-xl text-sm font-mono-math font-bold transition-colors shrink-0 ${
                   showSymbolBar
                     ? 'bg-[#132346] text-white'
                     : 'text-slate-600 hover:text-[#132346] hover:bg-slate-200/70'

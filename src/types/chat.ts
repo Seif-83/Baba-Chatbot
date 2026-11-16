@@ -3,21 +3,24 @@ export type MathBranch = 'all' | 'algebra' | 'geometry';
 export type TutorMode = 'solve' | 'quiz';
 export type LanguagePreference = 'bilingual' | 'en' | 'ar';
 
-export interface ImageAttachment {
+export interface ChatAttachment {
+  type: 'image' | 'document';
+  name?: string;
   mimeType: string;
   data: string; // raw base64
-  previewUrl: string;
+  previewUrl?: string;
+  extractedText?: string;
+  size?: number;
 }
+
+// Backward compatibility alias
+export type ImageAttachment = ChatAttachment;
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  attachment?: {
-    mimeType: string;
-    data: string;
-    previewUrl?: string;
-  };
+  attachment?: ChatAttachment;
   createdAt: number;
   isError?: boolean;
 }

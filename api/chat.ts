@@ -3,14 +3,55 @@ export const config = {
 };
 
 interface IncomingAttachment {
+  name?: string;
   mimeType: string;
   data: string;
+  extractedText?: string;
 }
 
 interface IncomingMessage {
   role: 'user' | 'assistant';
   content: string;
   attachment?: IncomingAttachment;
+}
+
+async function extractAttachmentText(attachment: IncomingAttachment): Promise<string> {
+  if (attachment.extractedText && attachment.extractedText.trim().length > 0) {
+    return attachment.extractedText;
+  }
+  const mime = (attachment.mimeType || '').toLowerCase();
+  const name = (attachment.name || '').toLowerCase();
+  if (!attachment.data) return '';
+  const buffer = Buffer.from(attachment.data, 'base64');
+
+  if (mime.includes('word') || mime.includes('document') || name.endsWith('.docx') || name.endsWith('.doc')) {
+    try {
+      const mammoth = await import('mammoth');
+      const result = await (mammoth.default || mammoth).extractRawText({ buffer });
+      if (result.value?.trim()) return result.value.trim();
+    } catch (e) {
+      console.warn('Word document parse failed:', e);
+    }
+  }
+
+  if (mime.includes('pdf') || name.endsWith('.pdf')) {
+    try {
+      const pdfParse = await import('pdf-parse');
+      const parseFn = (pdfParse as any).default || pdfParse;
+      const data = await parseFn(buffer);
+      if (data.text?.trim()) return data.text.trim();
+    } catch (e) {
+      console.warn('PDF parse failed:', e);
+    }
+  }
+
+  if (mime.startsWith('text/') || name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.rtf')) {
+    try {
+      return buffer.toString('utf8');
+    } catch {}
+  }
+
+  return '';
 }
 
 interface ChatRequestBody {
@@ -121,20 +162,27 @@ export default async function handler(req: any, res: any) {
     }
 
     const hasImages = body.messages.some(
-      (m) => m.attachment && m.attachment.data && m.attachment.mimeType
+      (m) =>
+        m.attachment &&
+        m.attachment.data &&
+        (m.attachment.mimeType || '').toLowerCase().startsWith('image/')
     );
     const defaultModel = process.env.OPENROUTER_MODEL || 'z-ai/glm-4.7-flash';
     const visionModel = process.env.OPENROUTER_VISION_MODEL || 'nvidia/nemotron-3.5-super-vl:free';
     const model = hasImages ? visionModel : defaultModel;
     const maxTokens = Number(process.env.OPENROUTER_MAX_TOKENS) || 4000;
 
-    const openRouterMessages = [
+    const openRouterMessages: Array<{ role: string; content: any }> = [
       {
         role: 'system',
         content: systemInstruction,
       },
-      ...body.messages.map((msg) => {
-        if (msg.attachment && msg.attachment.data && msg.attachment.mimeType) {
+    ];
+
+    for (const msg of body.messages) {
+      if (msg.attachment && msg.attachment.data) {
+        const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
+        if (isImage) {
           const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
             {
               type: 'image_url',
@@ -148,17 +196,31 @@ export default async function handler(req: any, res: any) {
               ? msg.content
               : 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.';
           parts.push({ type: 'text', text });
-          return {
+          openRouterMessages.push({
             role: msg.role === 'assistant' ? 'assistant' : 'user',
             content: parts,
-          };
+          });
+        } else {
+          // Document file
+          const docText = await extractAttachmentText(msg.attachment);
+          const docName = msg.attachment.name || 'مستند مرفق';
+          const userQuestion =
+            msg.content && msg.content.trim().length > 0
+              ? msg.content
+              : 'يرجى قراءة هذا المستند وشرح وحل المسائل الرياضية الموجودة فيه بالتفصيل.';
+          const combinedContent = `[مستند مرفق: ${docName}]\n--- بداية محتوى المستند ---\n${docText}\n--- نهاية محتوى المستند ---\n\nسؤال الطالب: ${userQuestion}`;
+          openRouterMessages.push({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: combinedContent,
+          });
         }
-        return {
+      } else {
+        openRouterMessages.push({
           role: msg.role === 'assistant' ? 'assistant' : 'user',
           content: msg.content || '',
-        };
-      }),
-    ];
+        });
+      }
+    }
 
     const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
