@@ -10,8 +10,10 @@ import {
   Sparkles,
   Languages,
   GraduationCap,
+  Cpu,
 } from 'lucide-react';
 import { BRANCH_OPTIONS, GRADE_OPTIONS } from '../data/curriculum';
+import { AI_MODELS } from '../data/models';
 import type { Conversation, MathBranch, PrepGrade, TutorMode, LanguagePreference } from '../types/chat';
 
 interface SidebarProps {
@@ -25,6 +27,8 @@ interface SidebarProps {
   onChangeMode?: (mode: TutorMode) => void;
   language?: LanguagePreference;
   onChangeLanguage?: (language: LanguagePreference) => void;
+  selectedModelId?: string;
+  onChangeModelId?: (modelId: string) => void;
   conversations: Conversation[];
   activeId: string;
   onSelectConversation: (id: string) => void;
@@ -45,6 +49,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChangeMode,
   language = 'bilingual',
   onChangeLanguage,
+  selectedModelId,
+  onChangeModelId,
   conversations,
   activeId,
   onSelectConversation,
@@ -264,6 +270,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             )}
           </div>
+
+          {/* AI Model Selector */}
+          {onChangeModelId && (
+            <div className="pt-2 border-t border-white/10">
+              <p className="text-xs font-semibold text-slate-300 mb-1.5 px-1 flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 text-[#E6B87A]" />
+                <span>محرك الذكاء الاصطناعي (Model)</span>
+              </p>
+              <div className="space-y-1">
+                <select
+                  value={selectedModelId || AI_MODELS[0].id}
+                  onChange={(e) => onChangeModelId(e.target.value)}
+                  className="w-full rounded-xl bg-[#0C1833] border border-white/10 text-white text-xs px-2.5 py-2 font-medium focus:outline-none focus:ring-1 focus:ring-[#B86428]"
+                >
+                  {AI_MODELS.map((m) => (
+                    <option key={m.id} value={m.id} className="bg-[#132346] text-white">
+                      {m.labelAr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           {/* Recent Saved Conversations */}
           <div className="space-y-1 pt-2">

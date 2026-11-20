@@ -113,6 +113,8 @@ interface ChatRequestBody {
   branch: 'all' | 'algebra' | 'geometry';
   mode: 'solve' | 'quiz';
   language: 'bilingual' | 'en' | 'ar';
+  provider?: 'groq' | 'openrouter' | 'auto';
+  model?: string;
 }
 
 function getGeminiClient(): GoogleGenAI {
@@ -217,174 +219,90 @@ async function startServer() {
       const language = body.language || 'bilingual';
       const systemInstruction = buildSystemInstruction(grade, branch, mode, language);
 
-      const openRouterKey = process.env.OPENROUTER_API_KEY;
       const groqKey = process.env.GROQ_API_KEY;
-      const provider = process.env.AI_PROVIDER || (groqKey ? 'groq' : 'openrouter');
+      const openRouterKey = process.env.OPENROUTER_API_KEY;
 
-      // --- Groq provider (fastest, free tier) ---
-      if (provider === 'groq' && groqKey) {
-        const hasImages = body.messages.some(
-          (m) =>
-            m.attachment &&
-            m.attachment.data &&
-            (m.attachment.mimeType || '').toLowerCase().startsWith('image/')
-        );
-        const defaultModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+      if (!groqKey && !openRouterKey) {
+        res.status(500).json({
+          error: 'لم يتم العثور على مفتاح الذكاء الاصطناعي (GROQ_API_KEY أو OPENROUTER_API_KEY) في إعدادات الخادم.',
+        });
+        return;
+      }
+
+      const hasImages = body.messages.some(
+        (m) =>
+          m.attachment &&
+          m.attachment.data &&
+          (m.attachment.mimeType || '').toLowerCase().startsWith('image/')
+      );
+
+      const requestedProvider = body.provider || 'auto';
+      let chosenProvider: 'groq' | 'openrouter' = 'groq';
+
+      if (requestedProvider === 'openrouter') {
+        chosenProvider = openRouterKey ? 'openrouter' : 'groq';
+      } else if (requestedProvider === 'groq') {
+        chosenProvider = groqKey ? 'groq' : 'openrouter';
+      } else {
+        chosenProvider = groqKey ? 'groq' : 'openrouter';
+      }
+
+      const formattedMessages: Array<{ role: string; content: any }> = [
+        { role: 'system', content: systemInstruction },
+      ];
+
+      for (const msg of body.messages) {
+        if (msg.attachment && msg.attachment.data) {
+          const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
+          if (isImage) {
+            const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
+              {
+                type: 'image_url',
+                image_url: { url: `data:${msg.attachment.mimeType};base64,${msg.attachment.data}` },
+              },
+            ];
+            const text = msg.content?.trim() || 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.';
+            parts.push({ type: 'text', text });
+            formattedMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: parts });
+          } else {
+            const docText = await extractAttachmentText(msg.attachment);
+            const docName = msg.attachment.name || 'مستند مرفق';
+            const userQuestion = msg.content?.trim() || 'يرجى قراءة هذا المستند وشرح وحل المسائل الرياضية الموجودة فيه بالتفصيل.';
+            formattedMessages.push({
+              role: msg.role === 'assistant' ? 'assistant' : 'user',
+              content: `[مستند مرفق: ${docName}]\n--- بداية محتوى المستند ---\n${docText}\n--- نهاية المستند ---\n\nسؤال الطالب: ${userQuestion}`,
+            });
+          }
+        } else {
+          formattedMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content || '' });
+        }
+      }
+
+      const callGroq = async (customModel?: string) => {
+        if (!groqKey) throw new Error('GROQ_API_KEY is not configured');
+        const defaultModel = customModel || process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
         const visionModel = process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
         const model = hasImages ? visionModel : defaultModel;
         const maxTokens = Number(process.env.GROQ_MAX_TOKENS) || 4000;
 
-        const groqMessages: Array<{ role: string; content: any }> = [
-          { role: 'system', content: systemInstruction },
-        ];
-
-        for (const msg of body.messages) {
-          if (msg.attachment && msg.attachment.data) {
-            const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
-            if (isImage) {
-              const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
-                {
-                  type: 'image_url',
-                  image_url: { url: `data:${msg.attachment.mimeType};base64,${msg.attachment.data}` },
-                },
-              ];
-              const text = msg.content?.trim() || 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.';
-              parts.push({ type: 'text', text });
-              groqMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: parts });
-            } else {
-              const docText = await extractAttachmentText(msg.attachment);
-              const docName = msg.attachment.name || 'مستند مرفق';
-              const userQuestion = msg.content?.trim() || 'يرجى قراءة هذا المستند وشرح وحل المسائل الرياضية الموجودة فيه بالتفصيل.';
-              groqMessages.push({
-                role: msg.role === 'assistant' ? 'assistant' : 'user',
-                content: `[مستند مرفق: ${docName}]\n--- بداية محتوى المستند ---\n${docText}\n--- نهاية المستند ---\n\nسؤال الطالب: ${userQuestion}`,
-              });
-            }
-          } else {
-            groqMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content || '' });
-          }
-        }
-
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        return fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${groqKey}`,
           },
-          body: JSON.stringify({ model, max_tokens: maxTokens, stream: true, messages: groqMessages }),
+          body: JSON.stringify({ model, max_tokens: maxTokens, stream: true, messages: formattedMessages }),
         });
+      };
 
-        if (!groqResponse.ok) {
-          const errBody = await groqResponse.text().catch(() => '');
-          let errMsg = `Groq error HTTP ${groqResponse.status}`;
-          try {
-            const parsedErr = JSON.parse(errBody);
-            if (parsedErr?.error?.message) errMsg = parsedErr.error.message;
-          } catch {}
-          throw new Error(errMsg);
-        }
-
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders?.();
-
-        const reader = groqResponse.body?.getReader();
-        if (!reader) throw new Error('No readable stream from Groq.');
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const dataStr = trimmed.slice(5).trim();
-            if (dataStr === '[DONE]' || !dataStr) continue;
-            try {
-              const chunkObj = JSON.parse(dataStr);
-              const content = chunkObj.choices?.[0]?.delta?.content;
-              if (content) {
-                res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
-                (res as any).flush?.();
-              }
-            } catch {}
-          }
-        }
-
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
-        return;
-      }
-
-      // --- OpenRouter provider ---
-      if (openRouterKey) {
-        const hasImages = body.messages.some(
-          (m) =>
-            m.attachment &&
-            m.attachment.data &&
-            (m.attachment.mimeType || '').toLowerCase().startsWith('image/')
-        );
-        const defaultModel = process.env.OPENROUTER_MODEL || 'z-ai/glm-4.7-flash';
+      const callOpenRouter = async (customModel?: string) => {
+        if (!openRouterKey) throw new Error('OPENROUTER_API_KEY is not configured');
+        const defaultModel = customModel || process.env.OPENROUTER_MODEL || 'z-ai/glm-4.7-flash';
         const visionModel = process.env.OPENROUTER_VISION_MODEL || 'nvidia/nemotron-3.5-super-vl:free';
         const model = hasImages ? visionModel : defaultModel;
         const maxTokens = Number(process.env.OPENROUTER_MAX_TOKENS) || 4000;
 
-        const openRouterMessages: Array<{ role: string; content: any }> = [
-          {
-            role: 'system',
-            content: systemInstruction,
-          },
-        ];
-
-        for (const msg of body.messages) {
-          if (msg.attachment && msg.attachment.data) {
-            const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
-            if (isImage) {
-              const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:${msg.attachment.mimeType};base64,${msg.attachment.data}`,
-                  },
-                },
-              ];
-              const text =
-                msg.content && msg.content.trim().length > 0
-                  ? msg.content
-                  : 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.';
-              parts.push({ type: 'text', text });
-              openRouterMessages.push({
-                role: msg.role === 'assistant' ? 'assistant' : 'user',
-                content: parts,
-              });
-            } else {
-              // Document file
-              const docText = await extractAttachmentText(msg.attachment);
-              const docName = msg.attachment.name || 'مستند مرفق';
-              const userQuestion =
-                msg.content && msg.content.trim().length > 0
-                  ? msg.content
-                  : 'يرجى قراءة هذا المستند وشرح وحل المسائل الرياضية الموجودة فيه بالتفصيل.';
-              const combinedContent = `[مستند مرفق: ${docName}]\n--- بداية محتوى المستند ---\n${docText}\n--- نهاية محتوى المستند ---\n\nسؤال الطالب: ${userQuestion}`;
-              openRouterMessages.push({
-                role: msg.role === 'assistant' ? 'assistant' : 'user',
-                content: combinedContent,
-              });
-            }
-          } else {
-            openRouterMessages.push({
-              role: msg.role === 'assistant' ? 'assistant' : 'user',
-              content: msg.content || '',
-            });
-          }
-        }
-
-        const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        return fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -392,71 +310,112 @@ async function startServer() {
             'HTTP-Referer': 'http://localhost:3000',
             'X-Title': 'Mr. Amr Mohsen Math AI Tutor',
           },
-          body: JSON.stringify({
-            model,
-            max_tokens: maxTokens,
-            stream: true,
-            messages: openRouterMessages,
-          }),
+          body: JSON.stringify({ model, max_tokens: maxTokens, stream: true, messages: formattedMessages }),
         });
+      };
 
-        if (!openRouterResponse.ok) {
-          const errBody = await openRouterResponse.text().catch(() => '');
-          let errMsg = `OpenRouter error HTTP ${openRouterResponse.status}`;
-          try {
-            const parsedErr = JSON.parse(errBody);
-            if (parsedErr?.error?.message) {
-              errMsg = parsedErr.error.message;
-            }
-          } catch {}
-          throw new Error(errMsg);
-        }
+      let upstreamResponse: globalThis.Response;
+      const requestedModel = body.model && body.model !== 'auto' ? body.model : undefined;
 
-        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-cache, no-transform');
-        res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders?.();
-
-        const reader = openRouterResponse.body?.getReader();
-        if (!reader) {
-          throw new Error('No readable stream received from OpenRouter.');
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const dataStr = trimmed.slice(5).trim();
-            if (dataStr === '[DONE]') continue;
-            if (!dataStr) continue;
-
-            try {
-              const chunkObj = JSON.parse(dataStr);
-              const content = chunkObj.choices?.[0]?.delta?.content;
-              if (content) {
-                res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
-                (res as any).flush?.();
-              }
-            } catch {
-              // ignore malformed or keep-alive chunk
-            }
+      if (chosenProvider === 'groq') {
+        try {
+          upstreamResponse = await callGroq(requestedModel);
+          if (!upstreamResponse.ok && openRouterKey) {
+            console.warn(`Groq error HTTP ${upstreamResponse.status}, falling back to OpenRouter...`);
+            upstreamResponse = await callOpenRouter();
+          }
+        } catch (err) {
+          if (openRouterKey) {
+            console.warn('Groq failed, falling back to OpenRouter:', err);
+            upstreamResponse = await callOpenRouter();
+          } else {
+            throw err;
           }
         }
+      } else {
+        try {
+          upstreamResponse = await callOpenRouter(requestedModel);
+          if (!upstreamResponse.ok && groqKey) {
+            console.warn(`OpenRouter error HTTP ${upstreamResponse.status}, falling back to Groq...`);
+            upstreamResponse = await callGroq();
+          }
+        } catch (err) {
+          if (groqKey) {
+            console.warn('OpenRouter failed, falling back to Groq:', err);
+            upstreamResponse = await callGroq();
+          } else {
+            throw err;
+          }
+        }
+      }
 
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
+      if (!upstreamResponse.ok) {
+        const errBody = await upstreamResponse.text().catch(() => '');
+        let errMsg = `Upstream error HTTP ${upstreamResponse.status}`;
+        try {
+          const parsedErr = JSON.parse(errBody);
+          if (parsedErr?.error?.message) errMsg = parsedErr.error.message;
+        } catch {}
+        res.status(upstreamResponse.status).json({ error: errMsg });
         return;
       }
+
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+
+      const reader = upstreamResponse.body?.getReader();
+      if (!reader) {
+        res.status(500).json({ error: 'No readable stream received from upstream.' });
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let totalCharsEmitted = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr === '[DONE]') continue;
+          if (!dataStr) continue;
+
+          try {
+            const chunkObj = JSON.parse(dataStr);
+            if (chunkObj.error) {
+              const errStr = chunkObj.error.message || JSON.stringify(chunkObj.error);
+              res.write(`data: ${JSON.stringify({ error: errStr })}\n\n`);
+              (res as any).flush?.();
+              continue;
+            }
+            const content = chunkObj.choices?.[0]?.delta?.content;
+            if (content) {
+              totalCharsEmitted += content.length;
+              res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+              (res as any).flush?.();
+            }
+          } catch {}
+        }
+      }
+
+      if (totalCharsEmitted === 0) {
+        res.write(`data: ${JSON.stringify({ error: 'لم يتم إرجاع أي رد من نموذج الذكاء الاصطناعي. يرجى تجربة اختيار نموذج آخر من القائمة أو إعادة الإرسال.' })}\n\n`);
+      } else {
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      }
+      res.end();
+      return;
 
       const ai = getGeminiClient();
       const contents: Content[] = body.messages.map((msg) => {

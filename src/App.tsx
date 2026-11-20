@@ -12,6 +12,7 @@ import {
   RefreshCw,
   BookOpen,
   GraduationCap,
+  Cpu,
 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { MathContent } from './components/MathContent';
@@ -19,6 +20,7 @@ import { PWAInstallButton, OfflineIndicator } from './components/PWAInstallButto
 import { FormulaDrawer } from './components/FormulaDrawer';
 import { MaterialsDrawer } from './components/MaterialsDrawer';
 import { STUDY_MATERIALS, type MaterialItem } from './data/materials';
+import { AI_MODELS } from './data/models';
 import {
   GRADE_OPTIONS,
   MATH_SYMBOLS,
@@ -71,6 +73,9 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>(loadInitialConversations);
   const [activeId, setActiveId] = useState<string>(() => conversations[0]?.id || '');
   const [language, setLanguage] = useState<LanguagePreference>('bilingual');
+  const [selectedModelId, setSelectedModelId] = useState<string>(() => {
+    return localStorage.getItem('mr_amr_selected_model') || 'groq:qwen/qwen3.8-27b';
+  });
   const [input, setInput] = useState('');
   const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -340,6 +345,8 @@ export default function App() {
           branch: currentConv.branch,
           mode: currentConv.mode,
           language,
+          provider: (AI_MODELS.find((m) => m.id === selectedModelId) || AI_MODELS[0]).provider,
+          model: (AI_MODELS.find((m) => m.id === selectedModelId) || AI_MODELS[0]).model,
         }),
       });
 
@@ -508,6 +515,11 @@ export default function App() {
         }
         language={language}
         onChangeLanguage={(lang) => setLanguage(lang)}
+        selectedModelId={selectedModelId}
+        onChangeModelId={(id) => {
+          setSelectedModelId(id);
+          localStorage.setItem('mr_amr_selected_model', id);
+        }}
         conversations={conversations}
         activeId={activeConversation.id}
         onSelectConversation={(id) => setActiveId(id)}
@@ -591,6 +603,25 @@ export default function App() {
               <option value="en">English Math</option>
               <option value="ar">رياضيات عربي</option>
             </select>
+
+            {/* AI Model Selector */}
+            <div className="hidden lg:flex items-center">
+              <select
+                value={selectedModelId}
+                onChange={(e) => {
+                  setSelectedModelId(e.target.value);
+                  localStorage.setItem('mr_amr_selected_model', e.target.value);
+                }}
+                aria-label="اختيار نموذج الذكاء الاصطناعي"
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-[#132346] focus:outline-none focus:ring-2 focus:ring-[#132346]/20 min-h-[38px]"
+              >
+                {AI_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.labelAr}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <PWAInstallButton />
           </div>
@@ -707,8 +738,16 @@ export default function App() {
 
                 if (isUser) {
                   return (
-                    <div key={msg.id} className={`flex ${language === 'en' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[88%] sm:max-w-[78%] rounded-2xl ${language === 'en' ? 'rounded-br-sm' : 'rounded-tr-sm'} bg-[#132346] text-white px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-xs space-y-2`}>
+                    <div
+                      key={msg.id}
+                      dir={language === 'en' ? 'ltr' : 'rtl'}
+                      className={`flex ${language === 'en' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[88%] sm:max-w-[78%] rounded-2xl ${
+                          language === 'en' ? 'rounded-br-sm text-left' : 'rounded-tr-sm text-right'
+                        } bg-[#132346] text-white px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-xs space-y-2`}
+                      >
                         {msg.attachment && (
                           msg.attachment.type === 'document' || !msg.attachment.previewUrl ? (
                             <div className="flex items-center gap-2 p-2 rounded-xl bg-white/10 border border-white/20 text-xs">
@@ -740,7 +779,11 @@ export default function App() {
                 }
 
                 return (
-                  <div key={msg.id} className={`flex items-start gap-2 sm:gap-3 ${language === 'en' ? 'flex-row-reverse' : ''}`}>
+                  <div
+                    key={msg.id}
+                    dir={language === 'en' ? 'ltr' : 'rtl'}
+                    className="flex items-start gap-2 sm:gap-3"
+                  >
                     <img
                       src="/logo-transparent.png"
                       onError={(e) => {
@@ -754,7 +797,7 @@ export default function App() {
 
                     <div
                       className={`flex-1 min-w-0 rounded-2xl bg-white border p-3.5 sm:p-5 shadow-xs overflow-hidden ${
-                        language === 'en' ? 'rounded-tr-sm' : 'rounded-tl-sm'
+                        language === 'en' ? 'rounded-tl-sm text-left' : 'rounded-tl-sm text-right'
                       } ${
                         msg.isError ? 'border-red-300 bg-red-50/40' : 'border-slate-200'
                       }`}
@@ -762,14 +805,14 @@ export default function App() {
                       {msg.content ? (
                         <MathContent content={msg.content} dir={language === 'en' ? 'ltr' : 'auto'} />
                       ) : (
-                        <div className={`flex items-center gap-2 text-xs sm:text-sm text-slate-500 py-1 ${language === 'en' ? 'flex-row-reverse' : ''}`}>
+                        <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-500 py-1">
                           <span className="inline-block w-2 h-2 rounded-full bg-[#B86428] animate-bounce" />
                           <span>{language === 'en' ? 'Solving step by step...' : 'جاري كتابة الحل خطوة بخطوة...'}</span>
                         </div>
                       )}
 
                       {msg.content && !(isLastAssistant && isStreaming) && (
-                        <div className={`mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-1.5 sm:gap-2 ${language === 'en' ? 'flex-row-reverse' : ''}`}>
+                        <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-1.5 sm:gap-2">
                           <button
                             type="button"
                             onClick={() => handleCopy(msg.id, msg.content)}
@@ -973,7 +1016,7 @@ export default function App() {
               <textarea
                 ref={textareaRef}
                 rows={1}
-                dir="auto"
+                dir={language === 'en' ? 'ltr' : 'auto'}
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
@@ -986,8 +1029,14 @@ export default function App() {
                     sendMessage();
                   }
                 }}
-                placeholder="اكتب سؤالك أو مسألة الـ Math..."
-                className="flex-1 bg-transparent resize-none border-0 focus:outline-none text-base sm:text-sm text-slate-900 placeholder:text-slate-400 py-2 sm:py-2.5 max-h-36 min-w-0"
+                placeholder={
+                  language === 'en'
+                    ? 'Type your math question here... (e.g., Solve x² - 5x + 6 = 0)'
+                    : 'اكتب سؤالك أو مسألة الـ Math...'
+                }
+                className={`flex-1 bg-transparent resize-none border-0 focus:outline-none text-base sm:text-sm text-slate-900 placeholder:text-slate-400 py-2 sm:py-2.5 max-h-36 min-w-0 ${
+                  language === 'en' ? 'text-left' : ''
+                }`}
               />
 
               <button

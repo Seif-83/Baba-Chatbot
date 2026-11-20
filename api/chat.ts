@@ -68,6 +68,8 @@ interface ChatRequestBody {
   branch: 'all' | 'algebra' | 'geometry';
   mode: 'solve' | 'quiz';
   language: 'bilingual' | 'en' | 'ar';
+  provider?: 'groq' | 'openrouter' | 'auto';
+  model?: string;
 }
 
 function buildSystemInstruction(
@@ -91,7 +93,7 @@ function buildSystemInstruction(
   const languageRule: Record<ChatRequestBody['language'], string> = {
     bilingual:
       'Respond in clear Egyptian-friendly Arabic explanations paired with standard English Math terminology and LaTeX formulas (ideal for Language Schools / المدارس اللغات والتجريبية as well as Arabic schools — match the language the student writes in, while gently clarifying key English Math terms).',
-    en: 'Respond strictly in clear, encouraging English suitable for Egyptian Language Schools (Prep Math), using standard Egyptian MOE terminology (e.g., Given, R.T.P., Proof, S.S. for Solution Set).',
+    en: 'Respond strictly and completely in English from left-to-right (LTR). Suitable for Egyptian Language Schools (Prep Math), using standard Egyptian MOE terminology (e.g., Given, R.T.P., Proof, S.S. for Solution Set). Avoid Arabic words completely.',
     ar: 'Respond strictly in clear, encouraging Arabic suitable for Egyptian Preparatory Arabic Schools (المناهج المصرية للرياضيات، المعطيات، المطلوب، البرهان، مجموعة الحل).',
   };
 
@@ -146,6 +148,56 @@ BRAND & CONTACT INFO:
 - Stay focused on Preparatory Mathematics and student study support. If asked off-topic questions, politely steer back to Math with Mr. Amr Mohsen's assistant.`;
 }
 
+async function prepareOpenAIMessages(messages: IncomingMessage[], systemInstruction: string) {
+  const formattedMessages: Array<{ role: string; content: any }> = [
+    { role: 'system', content: systemInstruction },
+  ];
+
+  for (const msg of messages) {
+    if (msg.attachment && msg.attachment.data) {
+      const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
+      if (isImage) {
+        const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:${msg.attachment.mimeType};base64,${msg.attachment.data}`,
+            },
+          },
+        ];
+        const text =
+          msg.content && msg.content.trim().length > 0
+            ? msg.content
+            : 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.';
+        parts.push({ type: 'text', text });
+        formattedMessages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: parts,
+        });
+      } else {
+        const docText = await extractAttachmentText(msg.attachment);
+        const docName = msg.attachment.name || 'مستند مرفق';
+        const userQuestion =
+          msg.content && msg.content.trim().length > 0
+            ? msg.content
+            : 'يرجى قراءة هذا المستند وشرح وحل المسائل الرياضية الموجودة فيه بالتفصيل.';
+        const combinedContent = `[مستند مرفق: ${docName}]\n--- بداية محتوى المستند ---\n${docText}\n--- نهاية محتوى المستند ---\n\nسؤال الطالب: ${userQuestion}`;
+        formattedMessages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: combinedContent,
+        });
+      }
+    } else {
+      formattedMessages.push({
+        role: msg.role === 'assistant' ? 'assistant' : 'user',
+        content: msg.content || '',
+      });
+    }
+  }
+
+  return formattedMessages;
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -179,112 +231,146 @@ export default async function handler(req: any, res: any) {
     const language = body.language || 'bilingual';
     const systemInstruction = buildSystemInstruction(grade, branch, mode, language);
 
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-    if (!openRouterKey) {
-      return res.status(500).json({ error: 'OPENROUTER_API_KEY is not configured in environment variables.' });
-    }
-
     const hasImages = body.messages.some(
       (m) =>
         m.attachment &&
         m.attachment.data &&
         (m.attachment.mimeType || '').toLowerCase().startsWith('image/')
     );
-    const defaultModel = process.env.OPENROUTER_MODEL || 'z-ai/glm-4.7-flash';
-    const visionModel = process.env.OPENROUTER_VISION_MODEL || 'nvidia/nemotron-3.5-super-vl:free';
-    const model = hasImages ? visionModel : defaultModel;
-    const maxTokens = Number(process.env.OPENROUTER_MAX_TOKENS) || 4000;
 
-    const openRouterMessages: Array<{ role: string; content: any }> = [
-      {
-        role: 'system',
-        content: systemInstruction,
-      },
-    ];
+    const groqKey = process.env.GROQ_API_KEY;
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
 
-    for (const msg of body.messages) {
-      if (msg.attachment && msg.attachment.data) {
-        const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
-        if (isImage) {
-          const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:${msg.attachment.mimeType};base64,${msg.attachment.data}`,
-              },
-            },
-          ];
-          const text =
-            msg.content && msg.content.trim().length > 0
-              ? msg.content
-              : 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.';
-          parts.push({ type: 'text', text });
-          openRouterMessages.push({
-            role: msg.role === 'assistant' ? 'assistant' : 'user',
-            content: parts,
-          });
-        } else {
-          // Document file
-          const docText = await extractAttachmentText(msg.attachment);
-          const docName = msg.attachment.name || 'مستند مرفق';
-          const userQuestion =
-            msg.content && msg.content.trim().length > 0
-              ? msg.content
-              : 'يرجى قراءة هذا المستند وشرح وحل المسائل الرياضية الموجودة فيه بالتفصيل.';
-          const combinedContent = `[مستند مرفق: ${docName}]\n--- بداية محتوى المستند ---\n${docText}\n--- نهاية محتوى المستند ---\n\nسؤال الطالب: ${userQuestion}`;
-          openRouterMessages.push({
-            role: msg.role === 'assistant' ? 'assistant' : 'user',
-            content: combinedContent,
-          });
+    if (!groqKey && !openRouterKey) {
+      return res.status(500).json({
+        error: 'لم يتم العثور على مفتاح الذكاء الاصطناعي (GROQ_API_KEY أو OPENROUTER_API_KEY) في إعدادات الخادم.',
+      });
+    }
+
+    // Determine provider & model
+    const requestedProvider = body.provider || 'auto';
+    let chosenProvider: 'groq' | 'openrouter' = 'groq';
+
+    if (requestedProvider === 'openrouter') {
+      chosenProvider = openRouterKey ? 'openrouter' : 'groq';
+    } else if (requestedProvider === 'groq') {
+      chosenProvider = groqKey ? 'groq' : 'openrouter';
+    } else {
+      // auto: prefer groq if available
+      chosenProvider = groqKey ? 'groq' : 'openrouter';
+    }
+
+    const formattedMessages = await prepareOpenAIMessages(body.messages, systemInstruction);
+
+    // Helper to call Groq
+    const callGroq = async (customModel?: string) => {
+      if (!groqKey) throw new Error('GROQ_API_KEY is not configured');
+      const defaultModel = customModel || process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+      const visionModel = process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
+      const model = hasImages ? visionModel : defaultModel;
+      const maxTokens = Number(process.env.GROQ_MAX_TOKENS) || 4000;
+
+      return fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${groqKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          stream: true,
+          messages: formattedMessages,
+        }),
+      });
+    };
+
+    // Helper to call OpenRouter
+    const callOpenRouter = async (customModel?: string) => {
+      if (!openRouterKey) throw new Error('OPENROUTER_API_KEY is not configured');
+      const defaultModel = customModel || process.env.OPENROUTER_MODEL || 'z-ai/glm-4.7-flash';
+      const visionModel = process.env.OPENROUTER_VISION_MODEL || 'nvidia/nemotron-3.5-super-vl:free';
+      const model = hasImages ? visionModel : defaultModel;
+      const maxTokens = Number(process.env.OPENROUTER_MAX_TOKENS) || 4000;
+
+      return fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${openRouterKey}`,
+          'HTTP-Referer': 'https://mr-amr-chatbot.vercel.app',
+          'X-Title': 'Mr. Amr Mohsen Math AI Tutor',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          stream: true,
+          messages: formattedMessages,
+        }),
+      });
+    };
+
+    let upstreamResponse: Response;
+    const requestedModel = body.model && body.model !== 'auto' ? body.model : undefined;
+
+    if (chosenProvider === 'groq') {
+      try {
+        upstreamResponse = await callGroq(requestedModel);
+        if (!upstreamResponse.ok && openRouterKey) {
+          console.warn(`Groq error HTTP ${upstreamResponse.status}, falling back to OpenRouter...`);
+          upstreamResponse = await callOpenRouter();
         }
-      } else {
-        openRouterMessages.push({
-          role: msg.role === 'assistant' ? 'assistant' : 'user',
-          content: msg.content || '',
-        });
+      } catch (err) {
+        if (openRouterKey) {
+          console.warn('Groq failed, falling back to OpenRouter:', err);
+          upstreamResponse = await callOpenRouter();
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      try {
+        upstreamResponse = await callOpenRouter(requestedModel);
+        if (!upstreamResponse.ok && groqKey) {
+          console.warn(`OpenRouter error HTTP ${upstreamResponse.status}, falling back to Groq...`);
+          upstreamResponse = await callGroq();
+        }
+      } catch (err) {
+        if (groqKey) {
+          console.warn('OpenRouter failed, falling back to Groq:', err);
+          upstreamResponse = await callGroq();
+        } else {
+          throw err;
+        }
       }
     }
 
-    const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${openRouterKey}`,
-        'HTTP-Referer': 'https://baba-chatbot.vercel.app',
-        'X-Title': 'Mr. Amr Mohsen Math AI Tutor',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        stream: true,
-        messages: openRouterMessages,
-      }),
-    });
-
-    if (!openRouterResponse.ok) {
-      const errBody = await openRouterResponse.text().catch(() => '');
-      let errMsg = `OpenRouter error HTTP ${openRouterResponse.status}`;
+    if (!upstreamResponse.ok) {
+      const errBody = await upstreamResponse.text().catch(() => '');
+      let errMsg = `Upstream error HTTP ${upstreamResponse.status}`;
       try {
         const parsedErr = JSON.parse(errBody);
         if (parsedErr?.error?.message) {
           errMsg = parsedErr.error.message;
         }
       } catch {}
-      return res.status(openRouterResponse.status).json({ error: errMsg });
+      return res.status(upstreamResponse.status).json({ error: errMsg });
     }
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
-    const reader = openRouterResponse.body?.getReader();
+    const reader = upstreamResponse.body?.getReader();
     if (!reader) {
-      return res.status(500).json({ error: 'No readable stream received from OpenRouter.' });
+      return res.status(500).json({ error: 'لم يتم استلام بث بيانات من خادم الذكاء الاصطناعي.' });
     }
 
     const decoder = new TextDecoder();
     let buffer = '';
+    let totalCharsEmitted = 0;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -303,8 +389,15 @@ export default async function handler(req: any, res: any) {
 
         try {
           const chunkObj = JSON.parse(dataStr);
+          if (chunkObj.error) {
+            const errStr = chunkObj.error.message || JSON.stringify(chunkObj.error);
+            res.write(`data: ${JSON.stringify({ error: errStr })}\n\n`);
+            (res as any).flush?.();
+            continue;
+          }
           const content = chunkObj.choices?.[0]?.delta?.content;
           if (content) {
+            totalCharsEmitted += content.length;
             res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
             (res as any).flush?.();
           }
@@ -312,7 +405,11 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    if (totalCharsEmitted === 0) {
+      res.write(`data: ${JSON.stringify({ error: 'لم يتم إرجاع أي رد من نموذج الذكاء الاصطناعي. يرجى تجربة اختيار نموذج آخر من القائمة أو إعادة الإرسال.' })}\n\n`);
+    } else {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    }
     res.end();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal Server Error';
