@@ -258,7 +258,17 @@ async function startServer() {
         { role: 'system', content: systemInstruction },
       ];
 
-      for (const msg of body.messages) {
+      for (let i = 0; i < body.messages.length; i++) {
+        const msg = body.messages[i];
+        const isPastAssistant = msg.role === 'assistant' && i < body.messages.length - 1;
+        if (isPastAssistant && msg.content && msg.content.length > 400) {
+          formattedMessages.push({
+            role: 'assistant',
+            content: msg.content.slice(0, 400) + '... [باقي الشرح السابق]',
+          });
+          continue;
+        }
+
         if (msg.attachment && msg.attachment.data) {
           const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
           if (isImage) {
@@ -363,6 +373,10 @@ async function startServer() {
           const parsedErr = JSON.parse(errBody);
           if (parsedErr?.error?.message) errMsg = parsedErr.error.message;
         } catch {}
+
+        if (errMsg.toLowerCase().includes('tokens per minute') || errMsg.includes('TPM') || errMsg.toLowerCase().includes('too large')) {
+          errMsg = 'عذراً، تم الوصول للحد الأقصى لعدد الكلمات في الدقيقة (Rate Limit). يرجى الانتظار 30 ثانية ثم إعادة المحاولة أو بدء محادثة جديدة.';
+        }
         res.status(upstreamResponse.status).json({ error: errMsg });
         return;
       }

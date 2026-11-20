@@ -251,7 +251,8 @@ export default function App() {
   const sendMessage = async (
     overrideText?: string,
     overrideAttachment?: ChatAttachment | null,
-    targetConvId?: string
+    targetConvId?: string,
+    explicitHistory?: ChatMessage[]
   ) => {
     const activeAtt = overrideAttachment !== undefined ? overrideAttachment : attachment;
     const textToSend = (overrideText ?? input).trim();
@@ -291,7 +292,7 @@ export default function App() {
     const currentConv =
       conversations.find((c) => c.id === convIdToUse) || activeConversation;
 
-    const currentHistory = currentConv.messages;
+    const currentHistory = explicitHistory !== undefined ? explicitHistory : currentConv.messages;
     const nextHistory = [...currentHistory, userMsg];
 
     const defaultTitle =
@@ -328,23 +329,40 @@ export default function App() {
     setIsStreaming(true);
 
     try {
+      // Sanitize and window history to stay well under TPM limits (e.g. Groq 7,000 TPM limit)
+      const sanitizedHistory = nextHistory.map((m, idx) => {
+        if (m.role === 'assistant' && idx < nextHistory.length - 1 && m.content.length > 500) {
+          return {
+            role: m.role,
+            content: m.content.slice(0, 500) + '... [باقي الحل السابق]',
+            attachment: undefined,
+          };
+        }
+        return {
+          role: m.role,
+          content: m.content,
+          attachment:
+            m.attachment && m.attachment.data
+              ? {
+                  name: m.attachment.name,
+                  mimeType: m.attachment.mimeType,
+                  data: m.attachment.data,
+                  extractedText: m.attachment.extractedText,
+                }
+              : undefined,
+        };
+      });
+
+      const messagesToSend =
+        sanitizedHistory.length > 4
+          ? [sanitizedHistory[0], ...sanitizedHistory.slice(-3)]
+          : sanitizedHistory;
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: nextHistory.map((m) => ({
-            role: m.role,
-            content: m.content,
-            attachment:
-              m.attachment && m.attachment.data
-                ? {
-                    name: m.attachment.name,
-                    mimeType: m.attachment.mimeType,
-                    data: m.attachment.data,
-                    extractedText: m.attachment.extractedText,
-                  }
-                : undefined,
-          })),
+          messages: messagesToSend,
           grade: currentConv.grade,
           branch: currentConv.branch,
           mode: currentConv.mode,
@@ -466,7 +484,8 @@ export default function App() {
           sendMessage(
             `مستر عمرو، من فضلك حل واشرح أسئلة هذا الامتحان (${item.title}) خطوة بخطوة بالتفصيل مع القوانين وطريقة الحل النموذجية.`,
             att,
-            newConv.id
+            newConv.id,
+            [] // Explicitly pass empty history so it never carries over prior chat tokens
           );
         }, 100);
       };
