@@ -81,12 +81,20 @@ async function extractAttachmentText(attachment: IncomingAttachment): Promise<st
 
   if (mime.includes('pdf') || name.endsWith('.pdf')) {
     try {
-      const pdfParse = await import('pdf-parse');
-      const parseFn = (pdfParse as any).default || pdfParse;
+      const pdfParseLib = await import('pdf-parse/lib/pdf-parse.js');
+      const parseFn = (pdfParseLib as any).default || pdfParseLib;
       const data = await parseFn(buffer);
       if (data.text?.trim()) return data.text.trim();
     } catch (e) {
-      console.warn('PDF parse failed:', e);
+      console.warn('PDF parse via lib failed, trying root:', e);
+      try {
+        const pdfParse = await import('pdf-parse');
+        const parseFn = (pdfParse as any).default || pdfParse;
+        const data = await parseFn(buffer);
+        if (data.text?.trim()) return data.text.trim();
+      } catch (err2) {
+        console.warn('PDF parse root failed:', err2);
+      }
     }
   }
 
@@ -177,6 +185,10 @@ MATH FORMATTING RULES (CRITICAL):
 IMAGE / HOMEWORK PHOTO HANDLING:
 - If the student sends an image of a math problem (handwritten or from a book like El-Moasser / المعاصر), first carefully read and transcribe the given problem and any diagram labels/measurements, then solve it step-by-step. If part of the image is blurry or cut off, state clearly what you can read and ask the student to confirm the missing part.
 
+EFFICIENCY & SPEED:
+- Start writing the solution IMMEDIATELY without conversational filler, long apologies, or repeating the user prompt.
+- Jump straight to solving each problem clearly step-by-step using LaTeX for math formulas.
+
 BRAND & CONTACT INFO:
 - Maintain Mr. Amr Mohsen's supportive, clear, and motivating classroom spirit.
 - If a student asks how to reach Mr. Amr Mohsen, book a lesson, or ask about classes/schedules, share his official contact number from the emblem: **01211143632** (Phone / WhatsApp).
@@ -206,6 +218,110 @@ async function startServer() {
       const systemInstruction = buildSystemInstruction(grade, branch, mode, language);
 
       const openRouterKey = process.env.OPENROUTER_API_KEY;
+      const groqKey = process.env.GROQ_API_KEY;
+      const provider = process.env.AI_PROVIDER || (groqKey ? 'groq' : 'openrouter');
+
+      // --- Groq provider (fastest, free tier) ---
+      if (provider === 'groq' && groqKey) {
+        const hasImages = body.messages.some(
+          (m) =>
+            m.attachment &&
+            m.attachment.data &&
+            (m.attachment.mimeType || '').toLowerCase().startsWith('image/')
+        );
+        const defaultModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+        const visionModel = process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
+        const model = hasImages ? visionModel : defaultModel;
+        const maxTokens = Number(process.env.GROQ_MAX_TOKENS) || 4000;
+
+        const groqMessages: Array<{ role: string; content: any }> = [
+          { role: 'system', content: systemInstruction },
+        ];
+
+        for (const msg of body.messages) {
+          if (msg.attachment && msg.attachment.data) {
+            const isImage = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
+            if (isImage) {
+              const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
+                {
+                  type: 'image_url',
+                  image_url: { url: `data:${msg.attachment.mimeType};base64,${msg.attachment.data}` },
+                },
+              ];
+              const text = msg.content?.trim() || 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.';
+              parts.push({ type: 'text', text });
+              groqMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: parts });
+            } else {
+              const docText = await extractAttachmentText(msg.attachment);
+              const docName = msg.attachment.name || 'مستند مرفق';
+              const userQuestion = msg.content?.trim() || 'يرجى قراءة هذا المستند وشرح وحل المسائل الرياضية الموجودة فيه بالتفصيل.';
+              groqMessages.push({
+                role: msg.role === 'assistant' ? 'assistant' : 'user',
+                content: `[مستند مرفق: ${docName}]\n--- بداية محتوى المستند ---\n${docText}\n--- نهاية المستند ---\n\nسؤال الطالب: ${userQuestion}`,
+              });
+            }
+          } else {
+            groqMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content || '' });
+          }
+        }
+
+        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${groqKey}`,
+          },
+          body: JSON.stringify({ model, max_tokens: maxTokens, stream: true, messages: groqMessages }),
+        });
+
+        if (!groqResponse.ok) {
+          const errBody = await groqResponse.text().catch(() => '');
+          let errMsg = `Groq error HTTP ${groqResponse.status}`;
+          try {
+            const parsedErr = JSON.parse(errBody);
+            if (parsedErr?.error?.message) errMsg = parsedErr.error.message;
+          } catch {}
+          throw new Error(errMsg);
+        }
+
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders?.();
+
+        const reader = groqResponse.body?.getReader();
+        if (!reader) throw new Error('No readable stream from Groq.');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const dataStr = trimmed.slice(5).trim();
+            if (dataStr === '[DONE]' || !dataStr) continue;
+            try {
+              const chunkObj = JSON.parse(dataStr);
+              const content = chunkObj.choices?.[0]?.delta?.content;
+              if (content) {
+                res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+                (res as any).flush?.();
+              }
+            } catch {}
+          }
+        }
+
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.end();
+        return;
+      }
+
+      // --- OpenRouter provider ---
       if (openRouterKey) {
         const hasImages = body.messages.some(
           (m) =>
@@ -329,6 +445,7 @@ async function startServer() {
               const content = chunkObj.choices?.[0]?.delta?.content;
               if (content) {
                 res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+                (res as any).flush?.();
               }
             } catch {
               // ignore malformed or keep-alive chunk

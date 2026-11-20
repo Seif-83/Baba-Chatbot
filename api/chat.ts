@@ -36,12 +36,20 @@ async function extractAttachmentText(attachment: IncomingAttachment): Promise<st
 
   if (mime.includes('pdf') || name.endsWith('.pdf')) {
     try {
-      const pdfParse = await import('pdf-parse');
-      const parseFn = (pdfParse as any).default || pdfParse;
+      const pdfParseLib = await import('pdf-parse/lib/pdf-parse.js');
+      const parseFn = (pdfParseLib as any).default || pdfParseLib;
       const data = await parseFn(buffer);
       if (data.text?.trim()) return data.text.trim();
     } catch (e) {
-      console.warn('PDF parse failed:', e);
+      console.warn('PDF parse via lib failed, trying root:', e);
+      try {
+        const pdfParse = await import('pdf-parse');
+        const parseFn = (pdfParse as any).default || pdfParse;
+        const data = await parseFn(buffer);
+        if (data.text?.trim()) return data.text.trim();
+      } catch (err2) {
+        console.warn('PDF parse root failed:', err2);
+      }
     }
   }
 
@@ -116,6 +124,21 @@ MATH FORMATTING RULES (CRITICAL):
 
 IMAGE / HOMEWORK PHOTO HANDLING:
 - If the student sends an image of a math problem (handwritten or from a book like El-Moasser / المعاصر), first carefully read and transcribe the given problem and any diagram labels/measurements, then solve it step-by-step. If part of the image is blurry or cut off, state clearly what you can read and ask the student to confirm the missing part.
+
+AVAILABLE OFFICIAL EXAMS & BOOKLETS (مكتبة مذكرات وامتحانات مستر عمرو محسن المتاحة):
+- **امتحان شامل رياضيات - الصف الثالث الإعدادي (Comprehensive Math Exam - Prep 3)**:
+  - الرابط المباشر للتحميل: \`/امتحانات/3rd%20prep/شامل%20٣ع.pdf\`
+  - يشمل: أسئلة اختر، ومسائل مقالية في الجبر (دوال الدرجة الثانية، التغير الطردي والعكسي، مجموعات الحل)، والهندسة وحساب المثلثات (إثبات استقامة النقاط، معادلة الخط المستقيم، مساحات وأطوال الأضلاع).
+- **قواعد الرد على طلبات الامتحانات والمذكرات**:
+  - إذا سألك الطالب عن امتحانات أو مذكرات مستر عمرو محسن (مثال: "عايز امتحان تالتة إعدادي"، "امتحان شامل"، "مذكرات المستر"):
+    1. قدم له فوراً رابط التحميل المباشر بصيغة Markdown:
+       [📄 اضغط هنا لتحميل امتحان شامل رياضيات - الصف الثالث الإعدادي](/امتحانات/3rd%20prep/شامل%20٣ع.pdf)
+    2. وضح له أن بإمكانه أيضاً تصفح **«بنك الامتحانات والمذكرات»** في الموقع لتحميل أي امتحان أو مذكرة، أو الضغط على زر «حل بالذكاء الاصطناعي» لأي امتحان ليتم حله وشرحه له فوراً!
+    3. اسأله بلطف: "تحب نبدأ نحل أول سؤال في الامتحان سوا؟"
+
+EFFICIENCY & SPEED:
+- Start writing the solution IMMEDIATELY without conversational filler, long apologies, or repeating the user prompt.
+- Jump straight to solving each problem clearly step-by-step using LaTeX for math formulas.
 
 BRAND & CONTACT INFO:
 - Maintain Mr. Amr Mohsen's supportive, clear, and motivating classroom spirit.
@@ -283,6 +306,7 @@ export default async function handler(req: any, res: any) {
           const content = chunkObj.choices?.[0]?.delta?.content;
           if (content) {
             res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+            (res as any).flush?.();
           }
         } catch {}
       }

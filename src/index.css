@@ -6,6 +6,16 @@
     --font-sans: "Cairo", "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
     --font-display: "Plus Jakarta Sans", "Cairo", system-ui, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overflow-x: hidden;
   }
 
   body {
@@ -15,7 +25,26 @@
     margin: 0;
     padding: 0;
     overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overflow-x: hidden;
+    width: 100%;
+    min-height: 100%;
   }
+}
+
+/* Safe Area Inset Utility Classes for iOS & Android */
+.pt-safe {
+  padding-top: max(0rem, env(safe-area-inset-top, 0px));
+}
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+.pl-safe {
+  padding-left: max(0rem, env(safe-area-inset-left, 0px));
+}
+.pr-safe {
+  padding-right: max(0rem, env(safe-area-inset-right, 0px));
 }
 
 .font-display {
@@ -32,7 +61,13 @@
   background-image:
     linear-gradient(to right, rgba(19, 35, 70, 0.035) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(19, 35, 70, 0.035) 1px, transparent 1px);
-  background-size: 28px 28px;
+  background-size: 24px 24px;
+}
+
+@media (min-width: 640px) {
+  .math-grid-bg {
+    background-size: 28px 28px;
+  }
 }
 
 /* Ensure KaTeX mathematical expressions always render LTR even inside RTL Arabic paragraphs */
@@ -40,19 +75,37 @@
 .katex-display {
   direction: ltr;
   unicode-bidi: isolate;
+  text-align: center;
 }
 
 .katex-display {
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0.75rem 1rem;
-  margin: 0.75rem 0;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.625rem 0.75rem;
+  margin: 0.625rem 0;
   background-color: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 0.75rem;
+  font-size: 0.95em;
+}
+
+@media (min-width: 640px) {
+  .katex-display {
+    padding: 0.75rem 1rem;
+    margin: 0.75rem 0;
+    font-size: 1em;
+  }
 }
 
 /* Clean markdown styling inside assistant responses */
+.math-prose {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
 .math-prose p {
   margin-bottom: 0.65rem;
   line-height: 1.75;
@@ -100,11 +153,21 @@
   margin: 0.85rem 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
+/* Mobile-friendly scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
 }

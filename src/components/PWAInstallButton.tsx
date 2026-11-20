@@ -24,11 +24,11 @@ export const PWAInstallButton: React.FC = () => {
       <button
         type="button"
         onClick={handleClick}
-        className="inline-flex items-center gap-2 rounded-lg bg-[#B86428] px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-[#9E531F] active:scale-[0.98] transition-all whitespace-nowrap shrink-0 min-h-[40px]"
+        className="inline-flex items-center gap-1.5 sm:gap-2 rounded-lg bg-[#B86428] px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold text-white shadow-xs hover:bg-[#9E531F] active:scale-[0.98] transition-all whitespace-nowrap shrink-0 min-h-[38px] sm:min-h-[40px]"
         aria-label="تثبيت التطبيق وإضافة اختصار للشاشة الرئيسية"
       >
-        <Download className="w-4 h-4 shrink-0" />
-        <span>تثبيت التطبيق</span>
+        <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+        <span className="hidden min-[360px]:inline">تثبيت التطبيق</span>
       </button>
 
       {showGuide && (

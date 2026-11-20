@@ -11,11 +11,14 @@ import {
   Sparkles,
   RefreshCw,
   BookOpen,
+  GraduationCap,
 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { MathContent } from './components/MathContent';
 import { PWAInstallButton, OfflineIndicator } from './components/PWAInstallButton';
 import { FormulaDrawer } from './components/FormulaDrawer';
+import { MaterialsDrawer } from './components/MaterialsDrawer';
+import { STUDY_MATERIALS, type MaterialItem } from './data/materials';
 import {
   GRADE_OPTIONS,
   MATH_SYMBOLS,
@@ -73,6 +76,7 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [formulaDrawerOpen, setFormulaDrawerOpen] = useState(false);
+  const [materialsDrawerOpen, setMaterialsDrawerOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showSymbolBar, setShowSymbolBar] = useState(false);
 
@@ -235,27 +239,32 @@ export default function App() {
     });
   };
 
-  const sendMessage = async (overrideText?: string) => {
+  const sendMessage = async (
+    overrideText?: string,
+    overrideAttachment?: ChatAttachment | null,
+    targetConvId?: string
+  ) => {
+    const activeAtt = overrideAttachment !== undefined ? overrideAttachment : attachment;
     const textToSend = (overrideText ?? input).trim();
-    if ((!textToSend && !attachment) || isStreaming) return;
+    if ((!textToSend && !activeAtt) || isStreaming) return;
 
     const userMsg: ChatMessage = {
       id: `msg_${Date.now()}_u`,
       role: 'user',
       content:
         textToSend ||
-        (attachment?.type === 'document'
+        (activeAtt?.type === 'document'
           ? 'يرجى قراءة هذا المستند وشرح وحل المسائل الموجودة فيه بالتفصيل.'
           : 'حل المسألة الموجودة في الصورة خطوة بخطوة مع الشرح.'),
-      attachment: attachment
+      attachment: activeAtt
         ? {
-            type: attachment.type,
-            name: attachment.name,
-            mimeType: attachment.mimeType,
-            data: attachment.data,
-            previewUrl: attachment.previewUrl,
-            extractedText: attachment.extractedText,
-            size: attachment.size,
+            type: activeAtt.type,
+            name: activeAtt.name,
+            mimeType: activeAtt.mimeType,
+            data: activeAtt.data,
+            previewUrl: activeAtt.previewUrl,
+            extractedText: activeAtt.extractedText,
+            size: activeAtt.size,
           }
         : undefined,
       createdAt: Date.now(),
@@ -269,25 +278,35 @@ export default function App() {
       createdAt: Date.now(),
     };
 
-    const currentHistory = activeConversation.messages;
+    const convIdToUse = targetConvId || activeConversation.id;
+    const currentConv =
+      conversations.find((c) => c.id === convIdToUse) || activeConversation;
+
+    const currentHistory = currentConv.messages;
     const nextHistory = [...currentHistory, userMsg];
 
     const defaultTitle =
-      attachment?.name
-        ? attachment.name.slice(0, 38)
+      activeAtt?.name
+        ? activeAtt.name.slice(0, 38)
         : textToSend
         ? textToSend.replace(/\$/g, '').slice(0, 38)
         : 'مسألة مرفقة';
 
     const derivedTitle =
-      currentHistory.length === 0 ? defaultTitle : activeConversation.title;
+      currentHistory.length === 0 ? defaultTitle : currentConv.title;
 
-    updateActiveConversation((conv) => ({
-      ...conv,
-      title: derivedTitle,
-      updatedAt: Date.now(),
-      messages: [...nextHistory, placeholderAssistant],
-    }));
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === convIdToUse
+          ? {
+              ...c,
+              title: derivedTitle,
+              updatedAt: Date.now(),
+              messages: [...nextHistory, placeholderAssistant],
+            }
+          : c
+      )
+    );
 
     if (!overrideText) {
       setInput('');
@@ -317,9 +336,9 @@ export default function App() {
                   }
                 : undefined,
           })),
-          grade: activeConversation.grade,
-          branch: activeConversation.branch,
-          mode: activeConversation.mode,
+          grade: currentConv.grade,
+          branch: currentConv.branch,
+          mode: currentConv.mode,
           language,
         }),
       });
@@ -362,12 +381,18 @@ export default function App() {
           }
           if (parsed.text) {
             accumulated += parsed.text;
-            updateActiveConversation((conv) => ({
-              ...conv,
-              messages: conv.messages.map((m) =>
-                m.id === assistantMsgId ? { ...m, content: accumulated } : m
-              ),
-            }));
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === convIdToUse
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantMsgId ? { ...m, content: accumulated } : m
+                      ),
+                    }
+                  : c
+              )
+            );
           }
         }
       }
@@ -378,19 +403,65 @@ export default function App() {
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'حدث خطأ أثناء الاتصال بالمساعد الذكي.';
-      updateActiveConversation((conv) => ({
-        ...conv,
-        messages: conv.messages.map((m) =>
-          m.id === assistantMsgId
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === convIdToUse
             ? {
-                ...m,
-                content: `عذراً، تعذر إكمال الحل الآن: ${message}`,
-                isError: true,
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        content: `عذراً، تعذر إكمال الحل الآن: ${message}`,
+                        isError: true,
+                      }
+                    : m
+                ),
               }
-            : m
-        ),
-      }));
+            : c
+        )
+      );
     } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  const handleSolveMaterial = async (item: MaterialItem) => {
+    try {
+      setIsStreaming(true);
+      const res = await fetch(encodeURI(item.fileUrl));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1] || '';
+        const att: ChatAttachment = {
+          type: 'document',
+          name: item.fileName,
+          mimeType: 'application/pdf',
+          data: base64,
+          extractedText: item.extractedText || undefined,
+          size: blob.size,
+        };
+
+        const newConv = createEmptyConversation(item.grade, item.branch, 'solve');
+        newConv.title = `حل ${item.title}`;
+        setConversations((prev) => [newConv, ...prev]);
+        setActiveId(newConv.id);
+        setIsStreaming(false);
+
+        setTimeout(() => {
+          sendMessage(
+            `مستر عمرو، من فضلك حل واشرح أسئلة هذا الامتحان (${item.title}) خطوة بخطوة بالتفصيل مع القوانين وطريقة الحل النموذجية.`,
+            att,
+            newConv.id
+          );
+        }, 100);
+      };
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      console.error('Failed to load material for solving:', err);
       setIsStreaming(false);
     }
   };
@@ -431,22 +502,29 @@ export default function App() {
         onChangeBranch={(branch) =>
           updateActiveConversation((c) => ({ ...c, branch }))
         }
+        mode={activeConversation.mode}
+        onChangeMode={(mode) =>
+          updateActiveConversation((c) => ({ ...c, mode }))
+        }
+        language={language}
+        onChangeLanguage={(lang) => setLanguage(lang)}
         conversations={conversations}
         activeId={activeConversation.id}
         onSelectConversation={(id) => setActiveId(id)}
         onNewChat={handleNewChat}
         onDeleteConversation={handleDeleteConversation}
         onOpenFormulas={() => setFormulaDrawerOpen(true)}
+        onOpenMaterials={() => setMaterialsDrawerOpen(true)}
       />
 
       <main className="flex-1 flex flex-col min-w-0 h-full relative">
-        {/* Compact Top Bar (<= 56px) */}
-        <header className="h-14 shrink-0 bg-white border-b border-slate-200 px-3 sm:px-5 flex items-center justify-between gap-3 z-20">
-          <div className="flex items-center gap-2.5 min-w-0">
+        {/* Compact Top Bar with Safe Area */}
+        <header className="h-14 sm:h-16 shrink-0 bg-white border-b border-slate-200 px-2.5 sm:px-5 flex items-center justify-between gap-2 sm:gap-3 z-20 pt-safe">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 transition-colors"
+              className="lg:hidden min-w-[42px] min-h-[42px] flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 active:bg-slate-200 transition-colors shrink-0"
               aria-label="فتح القائمة الجانبية"
             >
               <Menu className="w-5 h-5" />
@@ -458,19 +536,22 @@ export default function App() {
                 (e.currentTarget as HTMLImageElement).src = '/assets/aistudio/image_6971e0e5.png';
               }}
               alt="شعار مستر عمرو محسن"
-              className="lg:hidden w-9 h-9 rounded-full object-cover shrink-0"
+              className="lg:hidden w-8 h-8 sm:w-9 sm:h-9 rounded-full object-cover shrink-0"
               referrerPolicy="no-referrer"
             />
 
             <div className="min-w-0">
-              <span className="text-sm font-bold text-[#132346] truncate block">
+              <span className="text-xs sm:text-sm font-bold text-[#132346] truncate block">
                 مساعد مستر عمرو محسن
+              </span>
+              <span className="text-[10px] sm:text-xs text-slate-500 font-medium truncate block lg:hidden">
+                {activeGradeLabel}
               </span>
             </div>
           </div>
 
           {/* Mode & Language Controls */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <div className="hidden sm:flex items-center bg-slate-100 p-1 rounded-lg">
               <button
                 type="button"
@@ -518,9 +599,9 @@ export default function App() {
         {/* Scrollable Chat Stage */}
         <div className="flex-1 overflow-y-auto math-grid-bg">
           {activeConversation.messages.length === 0 ? (
-            <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col items-center">
+            <div className="max-w-3xl mx-auto px-3.5 sm:px-6 py-6 sm:py-12 flex flex-col items-center">
               {/* Central Medallion Hero */}
-              <div className="relative mb-6">
+              <div className="relative mb-4 sm:mb-6">
                 <img
                   src="/amr-mohsen-hero.jpg"
                   onError={(e) => {
@@ -528,28 +609,28 @@ export default function App() {
                       '/logo-transparent.png';
                   }}
                   alt="شعار مستر عمرو محسن الرسمي"
-                  className="w-48 h-48 sm:w-60 sm:h-60 rounded-3xl object-contain drop-shadow-2xl bg-white p-2 border border-slate-200/80 shadow-lg hover:scale-105 transition-transform duration-300"
+                  className="w-36 h-36 sm:w-52 sm:h-52 md:w-60 md:h-60 rounded-3xl object-contain drop-shadow-xl bg-white p-2 border border-slate-200/80 shadow-md hover:scale-105 transition-transform duration-300"
                   referrerPolicy="no-referrer"
                 />
               </div>
 
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-[#132346] text-center text-balance">
+              <h2 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-[#132346] text-center text-balance leading-snug">
                 أهلاً بك في المساعد الذكي لمستر عمرو محسن
               </h2>
-              <p className="mt-2.5 text-sm sm:text-base text-slate-600 text-center max-w-xl leading-relaxed">
+              <p className="mt-2 text-xs sm:text-sm md:text-base text-slate-600 text-center max-w-xl leading-relaxed">
                 مساعدك الشخصي في <strong className="text-[#132346]">الرياضيات و Math للمرحلة الإعدادية</strong> — اكتب مسألتك أو صورها من الكتاب وسيتم حلها وشرحها خطوة بخطوة.
               </p>
 
               {/* Mobile Quick Mode Switcher */}
-              <div className="sm:hidden mt-4 flex items-center gap-2 bg-white border border-slate-200 p-1 rounded-xl">
+              <div className="sm:hidden mt-4 flex items-center gap-1.5 bg-white border border-slate-200 p-1 rounded-xl shadow-xs">
                 <button
                   type="button"
                   onClick={() =>
                     updateActiveConversation((c) => ({ ...c, mode: 'solve' }))
                   }
-                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                     activeConversation.mode === 'solve'
-                      ? 'bg-[#132346] text-white'
+                      ? 'bg-[#132346] text-white shadow-xs'
                       : 'text-slate-600'
                   }`}
                 >
@@ -560,9 +641,9 @@ export default function App() {
                   onClick={() =>
                     updateActiveConversation((c) => ({ ...c, mode: 'quiz' }))
                   }
-                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                     activeConversation.mode === 'quiz'
-                      ? 'bg-[#132346] text-white'
+                      ? 'bg-[#132346] text-white shadow-xs'
                       : 'text-slate-600'
                   }`}
                 >
@@ -571,35 +652,45 @@ export default function App() {
               </div>
 
               {/* Quick Curriculum Starters */}
-              <div className="w-full mt-8">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <span className="text-xs font-bold text-slate-500">
+              <div className="w-full mt-6 sm:mt-8">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 px-1">
+                  <span className="text-[11px] sm:text-xs font-bold text-slate-500">
                     مسائل وموضوعات مقترحة · {activeGradeLabel}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setFormulaDrawerOpen(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#B86428] hover:text-[#9E531F] transition-colors"
-                  >
-                    <BookOpen className="w-3.5 h-3.5" />
-                    <span>تصفح ملخص القوانين</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMaterialsDrawerOpen(true)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#132346] hover:text-[#B86428] bg-slate-100 hover:bg-slate-200 transition-colors py-1 px-2.5 rounded-lg"
+                    >
+                      <GraduationCap className="w-3.5 h-3.5 text-[#B86428]" />
+                      <span>بنك الامتحانات والمذكرات</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormulaDrawerOpen(true)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#B86428] hover:text-[#9E531F] transition-colors py-1 px-1.5"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>ملخص القوانين</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                   {filteredPrompts.map((item) => (
                     <button
                       key={item.id}
                       type="button"
                       onClick={() => sendMessage(item.prompt)}
-                      className="text-start rounded-xl bg-white border border-slate-200 p-4 hover:border-[#B86428] hover:shadow-md transition-all group"
+                      className="text-start rounded-xl bg-white border border-slate-200 p-3.5 sm:p-4 hover:border-[#B86428] hover:shadow-md active:bg-slate-50 transition-all group"
                     >
-                      <div className="flex items-center justify-between gap-2 text-xs text-slate-500 mb-1.5">
+                      <div className="flex items-center justify-between gap-2 text-xs text-slate-500 mb-1">
                         <span>{item.branch === 'algebra' ? 'الجبر والإحصاء' : 'الهندسة'}</span>
                         <span aria-hidden="true">·</span>
                         <span className="font-display">{item.titleEn}</span>
                       </div>
-                      <p className="text-sm font-bold text-[#132346] group-hover:text-[#B86428] transition-colors">
+                      <p className="text-xs sm:text-sm font-bold text-[#132346] group-hover:text-[#B86428] transition-colors line-clamp-2">
                         {item.titleAr}
                       </p>
                     </button>
@@ -608,7 +699,7 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto px-3 sm:px-6 py-6 space-y-5">
+            <div className="max-w-3xl mx-auto px-2.5 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
               {activeConversation.messages.map((msg, idx) => {
                 const isUser = msg.role === 'user';
                 const isLastAssistant =
@@ -616,11 +707,11 @@ export default function App() {
 
                 if (isUser) {
                   return (
-                    <div key={msg.id} className="flex justify-start">
-                      <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-sm bg-[#132346] text-white px-4 py-3 shadow-sm space-y-2">
+                    <div key={msg.id} className={`flex ${language === 'en' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[88%] sm:max-w-[78%] rounded-2xl ${language === 'en' ? 'rounded-br-sm' : 'rounded-tr-sm'} bg-[#132346] text-white px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-xs space-y-2`}>
                         {msg.attachment && (
                           msg.attachment.type === 'document' || !msg.attachment.previewUrl ? (
-                            <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/10 border border-white/20 text-xs">
+                            <div className="flex items-center gap-2 p-2 rounded-xl bg-white/10 border border-white/20 text-xs">
                               <FileText className="w-5 h-5 text-[#C9A25D] shrink-0" />
                               <div className="min-w-0">
                                 <span className="font-semibold block truncate">
@@ -635,12 +726,12 @@ export default function App() {
                             <img
                               src={msg.attachment.previewUrl}
                               alt="صورة المسألة المرفقة"
-                              className="max-h-56 rounded-xl object-contain bg-white/10"
+                              className="max-h-48 sm:max-h-56 rounded-xl object-contain bg-white/10"
                               referrerPolicy="no-referrer"
                             />
                           )
                         )}
-                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap" dir="auto">
+                        <p className={`text-sm sm:text-[15px] leading-relaxed whitespace-pre-wrap break-words ${language === 'en' ? 'text-left' : ''}`} dir={language === 'en' ? 'ltr' : 'auto'}>
                           {msg.content}
                         </p>
                       </div>
@@ -649,7 +740,7 @@ export default function App() {
                 }
 
                 return (
-                  <div key={msg.id} className="flex items-start gap-3">
+                  <div key={msg.id} className={`flex items-start gap-2 sm:gap-3 ${language === 'en' ? 'flex-row-reverse' : ''}`}>
                     <img
                       src="/logo-transparent.png"
                       onError={(e) => {
@@ -657,40 +748,42 @@ export default function App() {
                           '/assets/aistudio/image_6971e0e5.png';
                       }}
                       alt="أيقونة مستر عمرو محسن"
-                      className="w-9 h-9 rounded-full object-cover shrink-0 mt-1 shadow-xs bg-white"
+                      className="w-7 h-7 sm:w-9 sm:h-9 rounded-full object-cover shrink-0 mt-1 shadow-xs bg-white"
                       referrerPolicy="no-referrer"
                     />
 
                     <div
-                      className={`flex-1 min-w-0 rounded-2xl rounded-tl-sm bg-white border p-4 sm:p-5 shadow-xs ${
+                      className={`flex-1 min-w-0 rounded-2xl bg-white border p-3.5 sm:p-5 shadow-xs overflow-hidden ${
+                        language === 'en' ? 'rounded-tr-sm' : 'rounded-tl-sm'
+                      } ${
                         msg.isError ? 'border-red-300 bg-red-50/40' : 'border-slate-200'
                       }`}
                     >
                       {msg.content ? (
-                        <MathContent content={msg.content} />
+                        <MathContent content={msg.content} dir={language === 'en' ? 'ltr' : 'auto'} />
                       ) : (
-                        <div className="flex items-center gap-2 text-sm text-slate-500 py-1">
+                        <div className={`flex items-center gap-2 text-xs sm:text-sm text-slate-500 py-1 ${language === 'en' ? 'flex-row-reverse' : ''}`}>
                           <span className="inline-block w-2 h-2 rounded-full bg-[#B86428] animate-bounce" />
-                          <span>جاري كتابة الحل خطوة بخطوة...</span>
+                          <span>{language === 'en' ? 'Solving step by step...' : 'جاري كتابة الحل خطوة بخطوة...'}</span>
                         </div>
                       )}
 
                       {msg.content && !(isLastAssistant && isStreaming) && (
-                        <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                        <div className={`mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-1.5 sm:gap-2 ${language === 'en' ? 'flex-row-reverse' : ''}`}>
                           <button
                             type="button"
                             onClick={() => handleCopy(msg.id, msg.content)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-[#132346] hover:bg-slate-100 transition-colors"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-[#132346] hover:bg-slate-100 active:bg-slate-200 transition-colors"
                           >
                             {copiedId === msg.id ? (
                               <>
                                 <Check className="w-3.5 h-3.5 text-[#059669]" />
-                                <span>تم النسخ</span>
+                                <span>{language === 'en' ? 'Copied!' : 'تم النسخ'}</span>
                               </>
                             ) : (
                               <>
                                 <Copy className="w-3.5 h-3.5" />
-                                <span>نسخ الحل</span>
+                                <span>{language === 'en' ? 'Copy solution' : 'نسخ الحل'}</span>
                               </>
                             )}
                           </button>
@@ -699,12 +792,16 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() =>
-                                sendMessage('اديني مسألة تانية مشابهة لنفس الفكرة عشان أتدرب عليها.')
+                                sendMessage(
+                                  language === 'en'
+                                    ? 'Give me a similar practice problem on the same concept.'
+                                    : 'اديني مسألة تانية مشابهة لنفس الفكرة عشان أتدرب عليها.'
+                                )
                               }
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#B86428] hover:bg-[#B86428]/10 transition-colors"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#B86428] hover:bg-[#B86428]/10 active:bg-[#B86428]/20 transition-colors"
                             >
                               <Sparkles className="w-3.5 h-3.5" />
-                              <span>مسألة مشابهة للتدريب</span>
+                              <span>{language === 'en' ? 'Practice problem' : 'مسألة للتدريب'}</span>
                             </button>
                           )}
 
@@ -720,7 +817,7 @@ export default function App() {
                               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-700 hover:bg-red-100 transition-colors"
                             >
                               <RefreshCw className="w-3.5 h-3.5" />
-                              <span>إعادة المحاولة</span>
+                              <span>{language === 'en' ? 'Retry' : 'إعادة المحاولة'}</span>
                             </button>
                           )}
                         </div>
@@ -734,18 +831,18 @@ export default function App() {
           )}
         </div>
 
-        {/* Composer Area */}
-        <footer className="shrink-0 bg-white border-t border-slate-200 px-3 sm:px-6 py-3">
+        {/* Composer Area with iOS Safe Area */}
+        <footer className="shrink-0 bg-white border-t border-slate-200 px-2 sm:px-6 py-2 sm:py-3 pb-safe">
           <div className="max-w-3xl mx-auto space-y-2">
             {/* Optional Quick Math Symbols Bar */}
             {showSymbolBar && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
                 {MATH_SYMBOLS.map((sym) => (
                   <button
                     key={sym.label}
                     type="button"
                     onClick={() => insertSymbol(sym.value)}
-                    className="min-w-[36px] h-9 px-2 rounded-lg bg-slate-100 hover:bg-[#132346] hover:text-white text-sm font-mono-math font-semibold text-[#132346] transition-colors shrink-0"
+                    className="min-w-[34px] sm:min-w-[38px] h-8 sm:h-9 px-2 rounded-lg bg-slate-100 hover:bg-[#132346] hover:text-white active:bg-[#132346] text-xs sm:text-sm font-mono-math font-semibold text-[#132346] transition-colors shrink-0"
                   >
                     {sym.label}
                   </button>
@@ -755,34 +852,34 @@ export default function App() {
 
             {/* Attached Problem Photo or Document Preview */}
             {attachment && (
-              <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-200 w-fit max-w-full">
+              <div className="flex items-center gap-2 sm:gap-3 p-2 rounded-xl bg-slate-50 border border-slate-200 w-fit max-w-full">
                 {attachment.type === 'document' || !attachment.previewUrl ? (
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-[#132346]/10 flex items-center justify-center shrink-0 text-[#132346]">
-                      <FileText className="w-5 h-5 text-[#B86428]" />
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-[#132346]/10 flex items-center justify-center shrink-0 text-[#132346]">
+                      <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-[#B86428]" />
                     </div>
                     <div className="min-w-0 pr-1">
-                      <span className="text-xs font-bold text-slate-800 truncate block max-w-[200px] sm:max-w-xs">
+                      <span className="text-xs font-bold text-slate-800 truncate block max-w-[180px] sm:max-w-xs">
                         {attachment.name || 'مستند مرفق'}
                       </span>
-                      <span className="text-[11px] text-slate-500 font-sans block">
+                      <span className="text-[10px] sm:text-[11px] text-slate-500 font-sans block">
                         {attachment.size ? `${(attachment.size / 1024).toFixed(1)} KB • ` : ''}مستند جاهز للتحليل
                       </span>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2">
                     <img
                       src={attachment.previewUrl}
                       alt="معاينة الصورة"
-                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"
+                      className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg object-cover border border-slate-200 shrink-0"
                       referrerPolicy="no-referrer"
                     />
                     <div className="min-w-0">
                       <span className="text-xs font-bold text-slate-800 block">
                         صورة مسألة
                       </span>
-                      <span className="text-[11px] text-slate-500 block">
+                      <span className="text-[10px] sm:text-[11px] text-slate-500 block">
                         جاهزة للشرح والحل
                       </span>
                     </div>
@@ -791,7 +888,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAttachment(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors mr-1 shrink-0"
+                  className="p-1 sm:p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors mr-1 shrink-0 min-w-[32px] min-h-[32px] flex items-center justify-center"
                   aria-label="إزالة المرفق"
                   title="إزالة المرفق"
                 >
@@ -800,7 +897,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex items-end gap-1.5 sm:gap-2 rounded-2xl border border-slate-300 bg-[#F8F9FB] px-2 sm:px-2.5 py-2 focus-within:border-[#132346] focus-within:ring-2 focus-within:ring-[#132346]/10 transition-all">
+            <div className="flex items-end gap-1 sm:gap-2 rounded-2xl border border-slate-300 bg-[#F8F9FB] px-1.5 sm:px-2.5 py-1.5 sm:py-2 focus-within:border-[#132346] focus-within:ring-2 focus-within:ring-[#132346]/10 transition-all">
               {/* Hidden file inputs */}
               <input
                 ref={cameraInputRef}
@@ -829,39 +926,39 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
-                className="min-w-[38px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-600 hover:text-[#B86428] hover:bg-slate-200/70 transition-colors shrink-0"
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-slate-600 hover:text-[#B86428] hover:bg-slate-200/70 active:bg-slate-300 transition-colors shrink-0"
                 title="فتح الكاميرا لتصوير المسألة مباشرة"
                 aria-label="فتح الكاميرا"
               >
-                <Camera className="w-5 h-5 text-[#B86428]" />
+                <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-[#B86428]" />
               </button>
 
               {/* Image Picker Button */}
               <button
                 type="button"
                 onClick={() => imageInputRef.current?.click()}
-                className="min-w-[38px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-600 hover:text-[#132346] hover:bg-slate-200/70 transition-colors shrink-0"
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-slate-600 hover:text-[#132346] hover:bg-slate-200/70 active:bg-slate-300 transition-colors shrink-0"
                 title="اختيار صورة مسألة من الجهاز"
                 aria-label="رفع صورة مسألة"
               >
-                <ImagePlus className="w-5 h-5" />
+                <ImagePlus className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               {/* Document Picker Button */}
               <button
                 type="button"
                 onClick={() => docInputRef.current?.click()}
-                className="min-w-[38px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-600 hover:text-[#132346] hover:bg-slate-200/70 transition-colors shrink-0"
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-slate-600 hover:text-[#132346] hover:bg-slate-200/70 active:bg-slate-300 transition-colors shrink-0"
                 title="إرفاق مستند أو مذكرة (Word, PDF, Text)"
                 aria-label="رفع مستند"
               >
-                <FileText className="w-5 h-5" />
+                <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowSymbolBar((prev) => !prev)}
-                className={`min-w-[38px] min-h-[40px] px-2 flex items-center justify-center rounded-xl text-sm font-mono-math font-bold transition-colors shrink-0 ${
+                className={`w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-xs sm:text-sm font-mono-math font-bold transition-colors shrink-0 ${
                   showSymbolBar
                     ? 'bg-[#132346] text-white'
                     : 'text-slate-600 hover:text-[#132346] hover:bg-slate-200/70'
@@ -872,6 +969,7 @@ export default function App() {
                 π√
               </button>
 
+              {/* Textarea: text-base on mobile prevents iOS Safari auto-zoom on focus */}
               <textarea
                 ref={textareaRef}
                 rows={1}
@@ -888,15 +986,15 @@ export default function App() {
                     sendMessage();
                   }
                 }}
-                placeholder="اكتب سؤالك أو مسألة الـ Math هنا... (مثال: حل المعادلة x² - 5x + 6 = 0)"
-                className="flex-1 bg-transparent resize-none border-0 focus:outline-none text-sm sm:text-[15px] text-slate-900 placeholder:text-slate-400 py-2.5 max-h-36"
+                placeholder="اكتب سؤالك أو مسألة الـ Math..."
+                className="flex-1 bg-transparent resize-none border-0 focus:outline-none text-base sm:text-sm text-slate-900 placeholder:text-slate-400 py-2 sm:py-2.5 max-h-36 min-w-0"
               />
 
               <button
                 type="button"
                 onClick={() => sendMessage()}
                 disabled={isStreaming || (!input.trim() && !attachment)}
-                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-[#132346] text-white hover:bg-[#1C3263] disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                className="w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center rounded-xl bg-[#132346] text-white hover:bg-[#1C3263] active:bg-[#0D1830] disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                 aria-label="إرسال السؤال"
               >
                 <Send className="w-4 h-4 -scale-x-100" />
@@ -911,6 +1009,13 @@ export default function App() {
         onClose={() => setFormulaDrawerOpen(false)}
         activeGrade={activeConversation.grade}
         onSelectFormulaPrompt={(prompt) => sendMessage(prompt)}
+      />
+
+      <MaterialsDrawer
+        isOpen={materialsDrawerOpen}
+        onClose={() => setMaterialsDrawerOpen(false)}
+        activeGrade={activeConversation.grade}
+        onSolveMaterial={handleSolveMaterial}
       />
 
       <OfflineIndicator />
