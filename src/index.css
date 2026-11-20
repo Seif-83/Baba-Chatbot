@@ -153,6 +153,33 @@
   margin: 0.85rem 0;
 }
 
+/* Table styling for markdown tables */
+.math-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.875rem;
+  overflow-x: auto;
+  display: block;
+}
+
+.math-prose th,
+.math-prose td {
+  border: 1px solid #cbd5e1;
+  padding: 0.5rem 0.75rem;
+  text-align: inherit;
+}
+
+.math-prose th {
+  background-color: #f1f5f9;
+  font-weight: 700;
+  color: #132346;
+}
+
+.math-prose tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+
 /* Mobile-friendly scrollbar */
 ::-webkit-scrollbar {
   width: 5px;

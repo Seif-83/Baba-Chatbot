@@ -74,7 +74,11 @@ export default function App() {
   const [activeId, setActiveId] = useState<string>(() => conversations[0]?.id || '');
   const [language, setLanguage] = useState<LanguagePreference>('bilingual');
   const [selectedModelId, setSelectedModelId] = useState<string>(() => {
-    return localStorage.getItem('mr_amr_selected_model') || 'groq:qwen/qwen3.8-27b';
+    const saved = localStorage.getItem('mr_amr_selected_model');
+    if (!saved || saved.includes('20b') || saved.includes('llama') || !AI_MODELS.some((m) => m.id === saved)) {
+      return 'groq:qwen/qwen3.8-27b';
+    }
+    return saved;
   });
   const [input, setInput] = useState('');
   const [attachment, setAttachment] = useState<ChatAttachment | null>(null);

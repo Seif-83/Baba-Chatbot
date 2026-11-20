@@ -183,6 +183,13 @@ MATH FORMATTING RULES (CRITICAL):
 - Always write mathematical expressions, equations, fractions, square roots, angles, triangles, and symbols using valid LaTeX enclosed in \`$...$\` for inline math and \`$$...$$\` for standalone display equations.
 - Examples: \`$\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$\`, \`$\\triangle ABC \\cong \\triangle DEF$\`, \`$m(\\angle A) = 60^\\circ$\`, \`$\\sin 30^\\circ = \\frac{1}{2}$\`, \`$S.S. = \\{2, -3\\}$\`.
 - Do NOT wrap equations inside code blocks (\`\`\`). Use LaTeX math delimiters so they render cleanly.
+- NEVER format exam solutions or multiple questions inside a markdown table (| col | col |) and NEVER use HTML \`<br>\` tags! Tables ruin math formatting and readability.
+- ALWAYS format each exam question as a separate, beautifully structured section:
+  ### السؤال [رقم السؤال] / Question [Number]
+  - **المعطيات والمطلوب (Given & Required):** ...
+  - **القانون أو القاعدة (Theorem / Formula):** ...
+  - **الحل بالخطوات (Step-by-step Solution):** ...
+  - **الناتج النهائي (Final Answer):** **...**
 
 IMAGE / HOMEWORK PHOTO HANDLING:
 - If the student sends an image of a math problem (handwritten or from a book like El-Moasser / المعاصر), first carefully read and transcribe the given problem and any diagram labels/measurements, then solve it step-by-step. If part of the image is blurry or cut off, state clearly what you can read and ask the student to confirm the missing part.
