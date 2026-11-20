@@ -169,27 +169,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ))}
             </div>
           </div>
-
-          {/* Branch Selector */}
-          <div>
-            <p className="text-xs font-semibold text-slate-300 mb-1.5 px-1">الفرع</p>
-            <div className="grid grid-cols-3 gap-1.5 bg-[#0C1833] p-1 rounded-xl">
-              {BRANCH_OPTIONS.map((b) => (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => onChangeBranch(b.id)}
-                  className={`py-2 px-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap active:scale-95 text-center truncate ${
-                    branch === b.id
-                      ? 'bg-[#B86428] text-white shadow-sm font-bold'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {b.labelAr}
-                </button>
-              ))}
-            </div>
-          </div>
+          
 
           {/* Mobile-only Quick Controls: Mode & Language */}
           <div className="sm:hidden space-y-3 pt-1 border-t border-white/10">
