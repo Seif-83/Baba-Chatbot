@@ -475,14 +475,19 @@ export default function App() {
         };
 
         const newConv = createEmptyConversation(item.grade, item.branch, 'solve');
-        newConv.title = `حل ${item.title}`;
+        newConv.title = language === 'en' ? `Solve ${item.fileName}` : `حل ${item.title}`;
         setConversations((prev) => [newConv, ...prev]);
         setActiveId(newConv.id);
         setIsStreaming(false);
 
+        const promptText =
+          language === 'en'
+            ? `Mr. Amr, please solve and explain all the questions of this exam (${item.fileName}) step-by-step in English, with all formulas, theorems, and standard model answers.`
+            : `مستر عمرو، من فضلك حل واشرح أسئلة هذا الامتحان (${item.title}) خطوة بخطوة بالتفصيل مع القوانين وطريقة الحل النموذجية.`;
+
         setTimeout(() => {
           sendMessage(
-            `مستر عمرو، من فضلك حل واشرح أسئلة هذا الامتحان (${item.title}) خطوة بخطوة بالتفصيل مع القوانين وطريقة الحل النموذجية.`,
+            promptText,
             att,
             newConv.id,
             [] // Explicitly pass empty history so it never carries over prior chat tokens
@@ -777,10 +782,10 @@ export default function App() {
                               <FileText className="w-5 h-5 text-[#C9A25D] shrink-0" />
                               <div className="min-w-0">
                                 <span className="font-semibold block truncate">
-                                  {msg.attachment.name || 'مستند مرفق'}
+                                  {msg.attachment.name || (language === 'en' ? 'Attached Document' : 'مستند مرفق')}
                                 </span>
                                 <span className="text-[11px] text-white/70 block">
-                                  مستند أسئلة / واجب
+                                  {language === 'en' ? 'Questions / Exam Document' : 'مستند أسئلة / واجب'}
                                 </span>
                               </div>
                             </div>
