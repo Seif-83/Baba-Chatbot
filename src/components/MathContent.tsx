@@ -29,6 +29,20 @@ export const MathContent: React.FC<MathContentProps> = ({ content, className = '
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
+        components={{
+          a: ({ href, children, ...props }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              download={href?.endsWith('.pdf') ? true : undefined}
+              className="inline-flex items-center gap-1 font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md transition-colors my-1 no-underline"
+              {...props}
+            >
+              {children}
+            </a>
+          ),
+        }}
       >
         {processed}
       </ReactMarkdown>

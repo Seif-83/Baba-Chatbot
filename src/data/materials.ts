@@ -20,7 +20,7 @@ export const STUDY_MATERIALS: MaterialItem[] = [
     type: 'exam',
     branch: 'all',
     fileName: 'شامل ٣ع.pdf',
-    fileUrl: '/امتحانات/3rd prep/شامل ٣ع.pdf',
+    fileUrl: '/materials/exams/prep3-comprehensive.pdf',
     description: 'امتحان مجمع لمستر عمرو محسن يشمل أسئلة الجبر والإحصاء والهندسة وحساب المثلثات مع مسائل متوقعة.',
     fileSize: '140 KB',
     year: '2024 / 2025',
