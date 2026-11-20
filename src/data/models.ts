@@ -1,6 +1,6 @@
 export interface AIModelOption {
   id: string;
-  provider: 'groq' | 'openrouter' | 'auto';
+  provider: 'gemini' | 'groq' | 'openrouter' | 'auto';
   model: string;
   name: string;
   labelAr: string;
@@ -11,14 +11,23 @@ export interface AIModelOption {
 
 export const AI_MODELS: AIModelOption[] = [
   {
+    id: 'gemini:gemini-3.5-flash',
+    provider: 'gemini',
+    model: 'gemini-3.5-flash',
+    name: 'Google Gemini 3.5 Flash',
+    labelAr: '✨ Google Gemini 3.5 Flash — الأقوى لحل وشرح الامتحانات الكبيرة 🌟',
+    labelEn: '✨ Google Gemini 3.5 Flash — Most Powerful Math Reasoning & Exams 🌟',
+    badge: 'الأقوى',
+    isRecommended: true,
+  },
+  {
     id: 'groq:qwen/qwen3.8-27b',
     provider: 'groq',
     model: 'qwen/qwen3.8-27b',
-    name: 'Groq: Qwen 2.5 (الأسرع والأدق)',
-    labelAr: '⚡ Qwen 2.5 (Groq) — الأسرع والأدق لحل وشرح الامتحانات 🌟',
-    labelEn: '⚡ Qwen 2.5 (Groq) — Ultra Fast & Best for Math Exams 🌟',
-    badge: 'موصى به',
-    isRecommended: true,
+    name: 'Groq: Qwen 2.5 (فائق السرعة)',
+    labelAr: '⚡ Qwen 2.5 (Groq) — فائق السرعة للشرح والمسائل الفردية ⚡',
+    labelEn: '⚡ Qwen 2.5 (Groq) — Ultra Fast for Problems & Questions ⚡',
+    badge: 'الأسرع',
   },
   {
     id: 'groq:openai/gpt-oss-120b',
@@ -46,19 +55,11 @@ export const AI_MODELS: AIModelOption[] = [
     labelEn: '🌐 GLM 4.7 Flash (OpenRouter) — Fast Fallback',
   },
   {
-    id: 'openrouter:nvidia/nemotron-3.5-super-vl:free',
-    provider: 'openrouter',
-    model: 'nvidia/nemotron-3.5-super-vl:free',
-    name: 'OpenRouter: Nemotron 3.5 Free',
-    labelAr: '🌐 Nemotron 3.5 (OpenRouter) — مجاني متقدم للمستندات',
-    labelEn: '🌐 Nemotron 3.5 (OpenRouter) — Free Vision & Documents',
-  },
-  {
     id: 'auto',
     provider: 'auto',
     model: 'auto',
     name: 'Smart Auto',
-    labelAr: '🚀 التلقائي الذكي (Qwen 2.5 أولاً مع تبديل تلقائي)',
-    labelEn: '🚀 Smart Auto (Qwen 2.5 with Auto Fallback)',
+    labelAr: '🚀 التلقائي الذكي (Gemini + Groq تبديل تلقائي)',
+    labelEn: '🚀 Smart Auto (Gemini + Groq Auto Fallback)',
   },
 ];

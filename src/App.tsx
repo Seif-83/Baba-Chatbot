@@ -76,7 +76,7 @@ export default function App() {
   const [selectedModelId, setSelectedModelId] = useState<string>(() => {
     const saved = localStorage.getItem('mr_amr_selected_model');
     if (!saved || saved.includes('20b') || saved.includes('llama') || !AI_MODELS.some((m) => m.id === saved)) {
-      return 'groq:qwen/qwen3.8-27b';
+      return 'gemini:gemini-3.5-flash';
     }
     return saved;
   });

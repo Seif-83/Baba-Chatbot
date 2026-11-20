@@ -226,12 +226,13 @@ async function startServer() {
       const language = body.language || 'bilingual';
       const systemInstruction = buildSystemInstruction(grade, branch, mode, language);
 
+      const geminiKey = process.env.GEMINI_API_KEY;
       const groqKey = process.env.GROQ_API_KEY;
       const openRouterKey = process.env.OPENROUTER_API_KEY;
 
-      if (!groqKey && !openRouterKey) {
+      if (!geminiKey && !groqKey && !openRouterKey) {
         res.status(500).json({
-          error: 'لم يتم العثور على مفتاح الذكاء الاصطناعي (GROQ_API_KEY أو OPENROUTER_API_KEY) في إعدادات الخادم.',
+          error: 'لم يتم العثور على أي مفتاح ذكاء اصطناعي في إعدادات الخادم.',
         });
         return;
       }
@@ -244,14 +245,16 @@ async function startServer() {
       );
 
       const requestedProvider = body.provider || 'auto';
-      let chosenProvider: 'groq' | 'openrouter' = 'groq';
+      let chosenProvider: 'gemini' | 'groq' | 'openrouter' = 'gemini';
 
-      if (requestedProvider === 'openrouter') {
-        chosenProvider = openRouterKey ? 'openrouter' : 'groq';
+      if (requestedProvider === 'gemini') {
+        chosenProvider = geminiKey ? 'gemini' : (groqKey ? 'groq' : 'openrouter');
       } else if (requestedProvider === 'groq') {
-        chosenProvider = groqKey ? 'groq' : 'openrouter';
+        chosenProvider = groqKey ? 'groq' : (geminiKey ? 'gemini' : 'openrouter');
+      } else if (requestedProvider === 'openrouter') {
+        chosenProvider = openRouterKey ? 'openrouter' : (geminiKey ? 'gemini' : 'groq');
       } else {
-        chosenProvider = groqKey ? 'groq' : 'openrouter';
+        chosenProvider = geminiKey ? 'gemini' : (groqKey ? 'groq' : 'openrouter');
       }
 
       const formattedMessages: Array<{ role: string; content: any }> = [
@@ -295,6 +298,44 @@ async function startServer() {
         }
       }
 
+      const callGemini = async (customModel = 'gemini-3.5-flash') => {
+        if (!geminiKey) throw new Error('GEMINI_API_KEY is not configured');
+        const contents: any[] = [];
+        for (let i = 0; i < body.messages.length; i++) {
+          const msg = body.messages[i];
+          const role = msg.role === 'assistant' ? 'model' : 'user';
+          const isPast = role === 'model' && i < body.messages.length - 1;
+          if (isPast && msg.content && msg.content.length > 500) {
+            contents.push({ role, parts: [{ text: msg.content.slice(0, 500) + '... [باقي الشرح]' }] });
+            continue;
+          }
+          if (msg.attachment && msg.attachment.data) {
+            const isImg = (msg.attachment.mimeType || '').toLowerCase().startsWith('image/');
+            if (isImg) {
+              const parts = [{ inlineData: { mimeType: msg.attachment.mimeType, data: msg.attachment.data } }];
+              if (msg.content) (parts as any[]).push({ text: msg.content });
+              contents.push({ role, parts });
+            } else {
+              const docText = await extractAttachmentText(msg.attachment);
+              contents.push({ role, parts: [{ text: `[مستند: ${msg.attachment.name || 'مرفق'}]\n${docText}\n\nالسؤال: ${msg.content || 'حل المسائل'}` }] });
+            }
+          } else if (msg.content) {
+            contents.push({ role, parts: [{ text: msg.content }] });
+          }
+        }
+
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${customModel}:streamGenerateContent?alt=sse&key=${geminiKey}`;
+        return fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemInstruction }] },
+            contents,
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+          }),
+        });
+      };
+
       const callGroq = async (customModel?: string) => {
         if (!groqKey) throw new Error('GROQ_API_KEY is not configured');
         const defaultModel = customModel || process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
@@ -334,16 +375,34 @@ async function startServer() {
       let upstreamResponse: globalThis.Response;
       const requestedModel = body.model && body.model !== 'auto' ? body.model : undefined;
 
-      if (chosenProvider === 'groq') {
+      if (chosenProvider === 'gemini') {
+        try {
+          upstreamResponse = await callGemini(requestedModel || 'gemini-3.5-flash');
+          if (!upstreamResponse.ok && groqKey) {
+            console.warn(`Gemini error HTTP ${upstreamResponse.status}, falling back to Groq...`);
+            upstreamResponse = await callGroq();
+          }
+        } catch (err) {
+          if (groqKey) {
+            console.warn('Gemini failed, falling back to Groq:', err);
+            upstreamResponse = await callGroq();
+          } else {
+            throw err;
+          }
+        }
+      } else if (chosenProvider === 'groq') {
         try {
           upstreamResponse = await callGroq(requestedModel);
-          if (!upstreamResponse.ok && openRouterKey) {
-            console.warn(`Groq error HTTP ${upstreamResponse.status}, falling back to OpenRouter...`);
+          if (!upstreamResponse.ok && geminiKey) {
+            console.warn(`Groq error HTTP ${upstreamResponse.status}, falling back to Gemini...`);
+            upstreamResponse = await callGemini();
+          } else if (!upstreamResponse.ok && openRouterKey) {
             upstreamResponse = await callOpenRouter();
           }
         } catch (err) {
-          if (openRouterKey) {
-            console.warn('Groq failed, falling back to OpenRouter:', err);
+          if (geminiKey) {
+            upstreamResponse = await callGemini();
+          } else if (openRouterKey) {
             upstreamResponse = await callOpenRouter();
           } else {
             throw err;
@@ -352,13 +411,15 @@ async function startServer() {
       } else {
         try {
           upstreamResponse = await callOpenRouter(requestedModel);
-          if (!upstreamResponse.ok && groqKey) {
-            console.warn(`OpenRouter error HTTP ${upstreamResponse.status}, falling back to Groq...`);
+          if (!upstreamResponse.ok && geminiKey) {
+            upstreamResponse = await callGemini();
+          } else if (!upstreamResponse.ok && groqKey) {
             upstreamResponse = await callGroq();
           }
         } catch (err) {
-          if (groqKey) {
-            console.warn('OpenRouter failed, falling back to Groq:', err);
+          if (geminiKey) {
+            upstreamResponse = await callGemini();
+          } else if (groqKey) {
             upstreamResponse = await callGroq();
           } else {
             throw err;
@@ -420,7 +481,11 @@ async function startServer() {
               (res as any).flush?.();
               continue;
             }
-            const content = chunkObj.choices?.[0]?.delta?.content;
+
+            const geminiText = chunkObj.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text;
+            const openAIText = chunkObj.choices?.[0]?.delta?.content;
+            const content = geminiText ?? openAIText;
+
             if (content) {
               totalCharsEmitted += content.length;
               res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
