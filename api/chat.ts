@@ -342,7 +342,7 @@ export default async function handler(req: any, res: any) {
     const grade = body.grade || 'prep3';
     const branch = body.branch || 'all';
     const mode = body.mode || 'solve';
-    const language = body.language || 'bilingual';
+    const language = body.language || 'en';
     const systemInstruction = buildSystemInstruction(grade, branch, mode, language);
 
     const hasImages = body.messages.some(

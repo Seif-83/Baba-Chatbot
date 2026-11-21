@@ -72,7 +72,27 @@ function loadInitialConversations(): Conversation[] {
 export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>(loadInitialConversations);
   const [activeId, setActiveId] = useState<string>(() => conversations[0]?.id || '');
-  const [language, setLanguage] = useState<LanguagePreference>('bilingual');
+  const [language, setLanguage] = useState<LanguagePreference>(() => {
+    try {
+      const saved = localStorage.getItem('mr_amr_language');
+      if (saved === 'en' || saved === 'ar' || saved === 'bilingual') {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'en';
+  });
+
+  const handleLanguageChange = (newLang: LanguagePreference) => {
+    setLanguage(newLang);
+    try {
+      localStorage.setItem('mr_amr_language', newLang);
+    } catch {
+      // ignore
+    }
+  };
+
   const [selectedModelId, setSelectedModelId] = useState<string>(() => {
     const saved = localStorage.getItem('mr_amr_selected_model');
     if (!saved || saved.includes('20b') || saved.includes('llama') || !AI_MODELS.some((m) => m.id === saved)) {
@@ -542,7 +562,7 @@ export default function App() {
           updateActiveConversation((c) => ({ ...c, mode }))
         }
         language={language}
-        onChangeLanguage={(lang) => setLanguage(lang)}
+        onChangeLanguage={handleLanguageChange}
         selectedModelId={selectedModelId}
         onChangeModelId={(id) => {
           setSelectedModelId(id);
@@ -623,12 +643,12 @@ export default function App() {
 
             <select
               value={language}
-              onChange={(e) => setLanguage(e.target.value as LanguagePreference)}
+              onChange={(e) => handleLanguageChange(e.target.value as LanguagePreference)}
               aria-label="لغة الشرح"
               className="hidden md:block rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#132346]/20 min-h-[38px]"
             >
-              <option value="bilingual">عربي + Math</option>
               <option value="en">English Math</option>
+              <option value="bilingual">عربي + Math</option>
               <option value="ar">رياضيات عربي</option>
             </select>
 

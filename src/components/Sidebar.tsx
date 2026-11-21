@@ -47,7 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChangeBranch,
   mode = 'solve',
   onChangeMode,
-  language = 'bilingual',
+  language = 'en',
   onChangeLanguage,
   selectedModelId,
   onChangeModelId,
@@ -215,17 +215,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="grid grid-cols-3 gap-1 bg-[#0C1833] p-1 rounded-xl">
                   <button
                     type="button"
-                    onClick={() => onChangeLanguage('bilingual')}
-                    className={`py-1.5 px-1 rounded-lg text-[11px] font-semibold transition-all text-center truncate ${
-                      language === 'bilingual'
-                        ? 'bg-[#B86428] text-white shadow-sm'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    عربي + Math
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => onChangeLanguage('en')}
                     className={`py-1.5 px-1 rounded-lg text-[11px] font-semibold transition-all text-center truncate ${
                       language === 'en'
@@ -234,6 +223,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }`}
                   >
                     English
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChangeLanguage('bilingual')}
+                    className={`py-1.5 px-1 rounded-lg text-[11px] font-semibold transition-all text-center truncate ${
+                      language === 'bilingual'
+                        ? 'bg-[#B86428] text-white shadow-sm'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    عربي + Math
                   </button>
                   <button
                     type="button"
